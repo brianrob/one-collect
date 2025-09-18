@@ -165,7 +165,8 @@ impl ExportProcessLinuxExt for ExportProcess {
                     strings);
 
                 for sym_file in sym_files {
-                    let mut sym_reader = ElfSymbolReader::new(sym_file);
+                    let load_header = ElfLoadHeader::new(metadata.p_offset(), metadata.p_vaddr());
+                    let mut sym_reader = ElfSymbolReader::new(sym_file, load_header);
                     let map_mut = self.mappings_mut().get_mut(map_index).unwrap();
 
                     map_mut.add_matching_symbols(
@@ -1177,6 +1178,12 @@ impl OSExportMachine {
                                     let mut build_id: [u8; 20] = [0; 20];
                                     if let Ok(id) = read_build_id(&mut reader, &sections, &section_offsets, &mut build_id) {
                                         elf_metadata.set_build_id(id);
+                                    }
+
+                                    // Read the load header from the binary to get p_vaddr and p_offset
+                                    if let Ok(load_header) = get_load_header(&mut reader) {
+                                        elf_metadata.set_p_offset(load_header.file_offset());
+                                        elf_metadata.set_p_vaddr(load_header.vaddr());
                                     }
 
                                     if read_package_metadata(&mut reader, &sections, &section_offsets, &mut package_buf).is_ok() {
