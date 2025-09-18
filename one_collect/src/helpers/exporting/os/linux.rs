@@ -146,6 +146,8 @@ impl ExportProcessLinuxExt for ExportProcess {
                 Err(_) => continue
             };
 
+            let file = filename.to_string();
+
             // Get the dev node or continue.
             let dev_node = match map.node() {
                 Some(key) => key,
@@ -165,6 +167,7 @@ impl ExportProcessLinuxExt for ExportProcess {
                     strings);
 
                 for sym_file in sym_files {
+                    println!("p_offset = 0x{:x} vaddr = 0x{:x} file = {}", metadata.p_offset(), metadata.p_vaddr(), file);
                     let load_header = ElfLoadHeader::new(metadata.p_offset(), metadata.p_vaddr());
                     let mut sym_reader = ElfSymbolReader::new(sym_file, load_header);
                     let map_mut = self.mappings_mut().get_mut(map_index).unwrap();

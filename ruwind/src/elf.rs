@@ -309,19 +309,13 @@ fn symbol_rva(
         return value;
     }
 
-    let section = &sections[sec_index];
+    /*let section = &sections[sec_index];
 
     if section.sec_type == SHT_NOBITS {
         return value;   
-    }
+    }*/
 
-    (value - load_header.vaddr()) + load_header.file_offset()
-}
-
-fn align_up(
-    value: u64,
-    align: u64) -> u64 {
-    (value + align - 1) & !(align - 1)
+    (value - (load_header.vaddr() & 0xFFFFFFFFFFFFF000)) + (load_header.file_offset() & 0xFFFFFFFFFFFFF000) // Page Align
 }
 
 fn get_symbol32(
@@ -402,6 +396,8 @@ fn get_symbol64(
 
     reader.seek(SeekFrom::Start(str_pos))?;
     symbol.name_len = reader.read(&mut symbol.name_buf)?;
+
+    println!("rva = 0x{:x} st_value = 0x{:x} p_offset = 0x{:x} vaddr = 0x{:x} sym = {}", symbol.start, sym.st_value, load_header.file_offset(), load_header.vaddr(), symbol.name());
 
     Ok(())
 }

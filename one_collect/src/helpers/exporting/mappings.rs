@@ -199,6 +199,10 @@ impl ExportMapping {
             if let Some((start_ip, end_ip)) = self.file_to_va_range(
                 sym_reader.start(), sym_reader.end()) {
 
+                if start_ip != sym_reader.start() {
+                   println!("start_ip = 0x{:x} end_ip = 0x{:x} sym_start = 0x{:x} sym_end = 0x{:x} sym_name = {}", start_ip, end_ip, sym_reader.start(), sym_reader.end(), sym_reader.name());
+                }
+
                 match unique_ips.binary_search(&start_ip) {
                     Ok(_) => {
                         add_sym = true;
@@ -226,6 +230,9 @@ impl ExportMapping {
 
                     self.add_symbol(symbol);
                 }
+            }
+            else {
+                   println!("NOMAP: start_ip = 0x0 end_ip = 0x0 sym_start = 0x{:x} sym_end = 0x{:x} sym_name = {}", sym_reader.start(), sym_reader.end(), sym_reader.name());
             }
         }
     }
