@@ -470,6 +470,7 @@ impl RingBufDataSource {
 
     fn add_cpu_bufs(
         target_pid: Option<i32>,
+        target_cpus: &Option<Vec<u16>>,
         leader_ids: &HashMap<u32, u64>,
         ring_bufs: &mut HashMap<u64, CpuRingBuf>,
         common_buf: &CommonRingBuf,
@@ -480,12 +481,14 @@ impl RingBufDataSource {
          * same CPU.
          */
         for i in 0..cpu_count() {
-            /* Only add to online/target CPUs */
-            let leader_id = match leader_ids.get(&i) {
-                Some(id) => { id },
-                None => { continue; },
-            };
+            /* Only enable online/target CPUs */
+            if let Some(target_cpus) = target_cpus {
+                if !target_cpus.contains(&(i as u16)) {
+                    continue;
+                }
+            }
 
+            let leader_id = leader_ids[&i];
             let leader = &ring_bufs[&leader_id];
             let mut cpu_buf = common_buf.for_cpu(i);
 
@@ -541,6 +544,7 @@ impl RingBufDataSource {
         let empty_pids = Vec::new();
 
         let target_pids = &mut self.target_pids.as_mut();
+        let target_cpus = &self.target_cpus;
 
         let pids = match target_pids {
             Some(pids) => {
@@ -554,13 +558,6 @@ impl RingBufDataSource {
 
         /* Build the kernel only dummy rings first */
         for i in 0..cpu_count() {
-            /* Limit CPUs to targets, if any */
-            if let Some(target_cpus) = &self.target_cpus {
-                if !target_cpus.contains(&(i as u16)) {
-                    continue;
-                }
-            }
-
             let mut cpu_buf = common.for_cpu(i);
 
             if pids.is_empty() {
@@ -593,6 +590,7 @@ impl RingBufDataSource {
             for pid in &pids[1..] {
                 Self::add_cpu_bufs(
                     Some(*pid),
+                    &None, /* Kernel events are for all CPUs */
                     &self.leader_ids,
                     &mut self.ring_bufs,
                     &common,
@@ -607,6 +605,7 @@ impl RingBufDataSource {
             if pids.is_empty() {
                 Self::add_cpu_bufs(
                     None,
+                    target_cpus,
                     &self.leader_ids,
                     &mut self.ring_bufs,
                     &common,
@@ -615,6 +614,7 @@ impl RingBufDataSource {
                 for pid in pids {
                     Self::add_cpu_bufs(
                         Some(*pid),
+                        target_cpus,
                         &self.leader_ids,
                         &mut self.ring_bufs,
                         &common,
@@ -630,6 +630,7 @@ impl RingBufDataSource {
             if pids.is_empty() {
                 Self::add_cpu_bufs(
                     None,
+                    target_cpus,
                     &self.leader_ids,
                     &mut self.ring_bufs,
                     &common,
@@ -638,6 +639,7 @@ impl RingBufDataSource {
                 for pid in pids {
                     Self::add_cpu_bufs(
                         Some(*pid),
+                        target_cpus,
                         &self.leader_ids,
                         &mut self.ring_bufs,
                         &common,
@@ -653,6 +655,7 @@ impl RingBufDataSource {
             if pids.is_empty() {
                 Self::add_cpu_bufs(
                     None,
+                    target_cpus,
                     &self.leader_ids,
                     &mut self.ring_bufs,
                     &common,
@@ -661,6 +664,7 @@ impl RingBufDataSource {
                 for pid in pids {
                     Self::add_cpu_bufs(
                         Some(*pid),
+                        target_cpus,
                         &self.leader_ids,
                         &mut self.ring_bufs,
                         &common,
@@ -675,6 +679,7 @@ impl RingBufDataSource {
             if pids.is_empty() {
                 Self::add_cpu_bufs(
                     None,
+                    target_cpus,
                     &self.leader_ids,
                     &mut self.ring_bufs,
                     &common,
@@ -683,6 +688,7 @@ impl RingBufDataSource {
                 for pid in pids {
                     Self::add_cpu_bufs(
                         Some(*pid),
+                        target_cpus,
                         &self.leader_ids,
                         &mut self.ring_bufs,
                         &common,
@@ -838,10 +844,15 @@ impl PerfDataSource for RingBufDataSource {
 
         if let Some(bpf_builder) = self.bpf_builder.as_mut() {
             let mut common = bpf_builder.build();
+            let mut target_cpus = &None;
 
             if let Some(event) = &event {
                 if event.has_no_callstack_flag() {
                     common = common.without_callstack();
+                }
+
+                if !event.has_no_cpu_mask_flag() {
+                    target_cpus = &self.target_cpus;
                 }
             }
 
@@ -849,6 +860,7 @@ impl PerfDataSource for RingBufDataSource {
                 None => {
                     Self::add_cpu_bufs(
                         None,
+                        target_cpus,
                         &self.leader_ids,
                         &mut self.ring_bufs,
                         &common,
@@ -858,6 +870,7 @@ impl PerfDataSource for RingBufDataSource {
                     for pid in pids {
                         Self::add_cpu_bufs(
                             Some(*pid),
+                            target_cpus,
                             &self.leader_ids,
                             &mut self.ring_bufs,
                             &common,
@@ -882,10 +895,16 @@ impl PerfDataSource for RingBufDataSource {
                 common = common.without_callstack();
             }
 
+            let target_cpus = match event.has_no_cpu_mask_flag() {
+                true => { &None },
+                false => { &self.target_cpus },
+            };
+
             match &self.target_pids {
                 None => {
                     Self::add_cpu_bufs(
                         None,
+                        target_cpus,
                         &self.leader_ids,
                         &mut self.ring_bufs,
                         &common,
@@ -895,6 +914,7 @@ impl PerfDataSource for RingBufDataSource {
                     for pid in pids {
                         Self::add_cpu_bufs(
                             Some(*pid),
+                            target_cpus,
                             &self.leader_ids,
                             &mut self.ring_bufs,
                             &common,

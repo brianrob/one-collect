@@ -1175,7 +1175,7 @@ impl EtwSession {
                             }
                         }
 
-                        if has_cpu_filter && !event.extension().ignore_cpu_mask() {
+                        if has_cpu_filter && !event.has_no_cpu_mask_flag() {
                             /* Skip events not on target CPUs */
                             if let Some(target_cpus) = &target_cpus {
                                 if !target_cpus.contains(&cpu_index) {

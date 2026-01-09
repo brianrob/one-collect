@@ -13,7 +13,6 @@ pub struct EventExtension {
     level: u8,
     keyword: u64,
     soft_pid: Option<PidCallback>,
-    ignore_cpu_mask: bool,
 }
 
 impl EventExtension {
@@ -40,10 +39,6 @@ impl EventExtension {
     pub fn keyword(&self) -> u64 { self.keyword }
 
     pub fn keyword_mut(&mut self) -> &mut u64 { &mut self.keyword }
-
-    pub fn ignore_cpu_mask(&self) -> bool { self.ignore_cpu_mask }
-
-    pub fn ignore_cpu_mask_mut(&mut self) -> &mut bool { &mut self.ignore_cpu_mask }
 }
 
 pub trait WindowsEventExtension {
