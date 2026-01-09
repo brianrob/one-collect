@@ -39,6 +39,9 @@ struct Args {
     #[arg(long = "pid", help = "Capture data for the specified process ID.  Multiple pids can be specified, one per usage of --pid")]
     target_pids: Option<Vec<i32>>,
 
+    #[arg(long = "cpu", help = "Capture data for the specified CPU.  Multiple cpus can be specified, one per usage of --cpu")]
+    target_cpus: Option<Vec<u16>>,
+
     #[arg(long, help = "Script snippet to run to enable complex configurations")]
     script: Option<String>,
 
@@ -71,6 +74,7 @@ pub struct RecordArgs {
     hard_page_faults: bool,
     live: bool,
     target_pids: Option<Vec<i32>>,
+    target_cpus: Option<Vec<u16>>,
     script: Option<String>,
 }
 
@@ -123,6 +127,7 @@ impl RecordArgs {
             hard_page_faults: command_args.hard_page_faults,
             live: command_args.live,
             target_pids: command_args.target_pids,
+            target_cpus: command_args.target_cpus,
             script,
         };
 
@@ -143,6 +148,9 @@ impl RecordArgs {
         info!("Arguments parsed: live={}", args.live);
         if let Some(ref pids) = args.target_pids {
             info!("Arguments parsed: target_pids={:?}", pids);
+        }
+        if let Some(ref cpus) = args.target_cpus {
+            info!("Arguments parsed: target_cpus={:?}", cpus);
         }
         if let Some(ref script) = args.script {
             info!("Arguments parsed: script start");
@@ -186,6 +194,10 @@ impl RecordArgs {
 
     pub (crate) fn target_pids(&self) -> &Option<Vec<i32>> {
         &self.target_pids
+    }
+
+    pub (crate) fn target_cpus(&self) -> &Option<Vec<u16>> {
+        &self.target_cpus
     }
 
     pub (crate) fn script(&self) -> &Option<String> {
