@@ -1577,6 +1577,12 @@ impl UniversalExporterOSHooks for UniversalExporter {
             }
         }
 
+        if let Some(target_cpus) = &settings.target_cpus {
+            for cpu in target_cpus {
+                builder = builder.with_target_cpu(*cpu);
+            }
+        }
+
         let mut builder = self.run_build_hooks(builder)?;
 
         let mut session = builder.build()?;

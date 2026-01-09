@@ -33,6 +33,7 @@ impl RingBufSessionHook {
 pub struct RingBufSessionBuilder {
     pages: usize,
     target_pids: Option<Vec<i32>>,
+    target_cpus: Option<Vec<u16>>,
     kernel_builder: Option<RingBufBuilder<Kernel>>,
     event_builder: Option<RingBufBuilder<Tracepoint>>,
     profiling_builder: Option<RingBufBuilder<Profiling>>,
@@ -54,6 +55,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: 1,
             target_pids: None,
+            target_cpus: None,
             kernel_builder: None,
             event_builder: None,
             profiling_builder: None,
@@ -83,6 +85,37 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: pids,
+            target_cpus: self.target_cpus.take(),
+            kernel_builder: self.kernel_builder.take(),
+            event_builder: self.event_builder.take(),
+            profiling_builder: self.profiling_builder.take(),
+            cswitch_builder: self.cswitch_builder.take(),
+            bpf_builder: self.bpf_builder.take(),
+            soft_page_faults_builder: self.soft_page_faults_builder.take(),
+            hard_page_faults_builder: self.hard_page_faults_builder.take(),
+            hooks: self.hooks.take(),
+        }
+    }
+
+    pub fn with_target_cpu(
+        &mut self,
+        cpu: u16) -> Self {
+        let cpus = match self.target_cpus.take() {
+            Some(mut cpus) => {
+                cpus.push(cpu);
+                Some(cpus)
+            },
+            None => {
+                let mut cpus = Vec::new();
+                cpus.push(cpu);
+                Some(cpus)
+            },
+        };
+
+        Self {
+            pages: self.pages,
+            target_pids: self.target_pids.take(),
+            target_cpus: cpus,
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -100,6 +133,7 @@ impl RingBufSessionBuilder {
         Self {
             pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -117,6 +151,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: Some(builder),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -145,6 +180,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: Some(builder),
             profiling_builder: self.profiling_builder.take(),
@@ -173,6 +209,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: Some(builder),
@@ -201,6 +238,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -229,6 +267,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -257,6 +296,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -285,6 +325,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -321,6 +362,7 @@ impl RingBufSessionBuilder {
         Self {
             pages: self.pages,
             target_pids: self.target_pids.take(),
+            target_cpus: self.target_cpus.take(),
             kernel_builder: self.kernel_builder.take(),
             event_builder: self.event_builder.take(),
             profiling_builder: self.profiling_builder.take(),
@@ -346,6 +388,7 @@ impl RingBufSessionBuilder {
         let mut source = RingBufDataSource::new(
             self.pages,
             self.target_pids.take(),
+            self.target_cpus.take(),
             self.kernel_builder.take(),
             self.event_builder.take(),
             self.profiling_builder.take(),
@@ -379,6 +422,7 @@ pub struct RingBufDataSource {
     pages: usize,
     enabled: bool,
     target_pids: Option<Vec<i32>>,
+    target_cpus: Option<Vec<u16>>,
     kernel_builder: Option<RingBufBuilder<Kernel>>,
     event_builder: Option<RingBufBuilder<Tracepoint>>,
     profiling_builder: Option<RingBufBuilder<Profiling>>,
@@ -394,6 +438,7 @@ impl RingBufDataSource {
     fn new(
         pages: usize,
         target_pids: Option<Vec<i32>>,
+        target_cpus: Option<Vec<u16>>,
         kernel_builder: Option<RingBufBuilder<Kernel>>,
         event_builder: Option<RingBufBuilder<Tracepoint>>,
         profiling_builder: Option<RingBufBuilder<Profiling>>,
@@ -409,6 +454,7 @@ impl RingBufDataSource {
             ring_bufs: HashMap::new(),
             pages,
             target_pids,
+            target_cpus,
             kernel_builder,
             event_builder,
             profiling_builder,
@@ -434,7 +480,12 @@ impl RingBufDataSource {
          * same CPU.
          */
         for i in 0..cpu_count() {
-            let leader_id = leader_ids[&i];
+            /* Only add to online/target CPUs */
+            let leader_id = match leader_ids.get(&i) {
+                Some(id) => { id },
+                None => { continue; },
+            };
+
             let leader = &ring_bufs[&leader_id];
             let mut cpu_buf = common_buf.for_cpu(i);
 
@@ -503,6 +554,13 @@ impl RingBufDataSource {
 
         /* Build the kernel only dummy rings first */
         for i in 0..cpu_count() {
+            /* Limit CPUs to targets, if any */
+            if let Some(target_cpus) = &self.target_cpus {
+                if !target_cpus.contains(&(i as u16)) {
+                    continue;
+                }
+            }
+
             let mut cpu_buf = common.for_cpu(i);
 
             if pids.is_empty() {
