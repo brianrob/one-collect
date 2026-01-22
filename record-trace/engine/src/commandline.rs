@@ -47,6 +47,15 @@ struct Args {
 
     #[arg(long, help = "Script file to run to enable complex configurations")]
     script_file: Option<String>,
+
+    #[arg(long, help = "Log filter configuration (e.g., 'target1=info,target2=debug')")]
+    log_filter: Option<String>,
+
+    #[arg(long, help = "Log file path")]
+    log_path: Option<String>,
+
+    #[arg(long, default_value_t = LogMode::File, help = "Log mode: 'disabled', 'console', or 'file'")]
+    log_mode: LogMode,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -64,6 +73,23 @@ impl fmt::Display for Format {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum LogMode {
+    Disabled,
+    Console,
+    File,
+}
+
+impl fmt::Display for LogMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogMode::Disabled => write!(f, "disabled"),
+            LogMode::Console => write!(f, "console"),
+            LogMode::File => write!(f, "file"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RecordArgs {
     output_path: PathBuf,
@@ -76,6 +102,9 @@ pub struct RecordArgs {
     target_pids: Option<Vec<i32>>,
     target_cpus: Option<Vec<u16>>,
     script: Option<String>,
+    log_filter: Option<String>,
+    log_path: Option<String>,
+    log_mode: LogMode,
 }
 
 impl RecordArgs {
@@ -129,6 +158,9 @@ impl RecordArgs {
             target_pids: command_args.target_pids,
             target_cpus: command_args.target_cpus,
             script,
+            log_filter: command_args.log_filter,
+            log_path: command_args.log_path,
+            log_mode: command_args.log_mode,
         };
 
         // Cross-argument validation.
@@ -140,28 +172,10 @@ impl RecordArgs {
             process::exit(1);
         }
 
-        info!("Arguments parsed: format={}", args.format);
-        info!("Arguments parsed: on_cpu={}", args.on_cpu);
-        info!("Arguments parsed: off_cpu={}", args.off_cpu);
-        info!("Arguments parsed: soft_page_faults={}", args.soft_page_faults);
-        info!("Arguments parsed: hard_page_faults={}", args.hard_page_faults);
-        info!("Arguments parsed: live={}", args.live);
-        if let Some(ref pids) = args.target_pids {
-            info!("Arguments parsed: target_pids={:?}", pids);
-        }
-        if let Some(ref cpus) = args.target_cpus {
-            info!("Arguments parsed: target_cpus={:?}", cpus);
-        }
-        if let Some(ref script) = args.script {
-            info!("Arguments parsed: script start");
-            info!("{}", script);
-            info!("Arguments parsed: script end");
-        }
-
         args
     }
 
-    pub (crate) fn output_path(&self) -> &PathBuf {
+    pub fn output_path(&self) -> &PathBuf {
         &self.output_path
     }
 
@@ -202,5 +216,45 @@ impl RecordArgs {
 
     pub (crate) fn script(&self) -> &Option<String> {
         &self.script
+    }
+
+    pub fn log_filter(&self) -> &Option<String> {
+        &self.log_filter
+    }
+
+    pub fn log_path(&self) -> &Option<String> {
+        &self.log_path
+    }
+
+    pub fn log_mode(&self) -> LogMode {
+        self.log_mode
+    }
+
+    pub fn write_to_log(&self) {
+        info!("Arguments parsed: output_path={}", self.output_path.display());
+        info!("Arguments parsed: format={}", self.format);
+        info!("Arguments parsed: on_cpu={}", self.on_cpu);
+        info!("Arguments parsed: off_cpu={}", self.off_cpu);
+        info!("Arguments parsed: soft_page_faults={}", self.soft_page_faults);
+        info!("Arguments parsed: hard_page_faults={}", self.hard_page_faults);
+        info!("Arguments parsed: live={}", self.live);
+        if let Some(ref pids) = self.target_pids {
+            info!("Arguments parsed: target_pids={:?}", pids);
+        }
+        if let Some(ref cpus) = self.target_cpus {
+            info!("Arguments parsed: target_cpus={:?}", cpus);
+        }
+        if let Some(ref filter) = self.log_filter {
+            info!("Arguments parsed: log_filter={}", filter);
+        }
+        if let Some(ref path) = self.log_path {
+            info!("Arguments parsed: log_path={}", path);
+        }
+        info!("Arguments parsed: log_mode={}", self.log_mode);
+        if let Some(ref script) = self.script {
+            info!("Arguments parsed: script start");
+            info!("{}", script);
+            info!("Arguments parsed: script end");
+        }
     }
 }

@@ -5,12 +5,18 @@ use tracing::{info, debug};
 
 use engine::commandline::RecordArgs;
 use engine::recorder::Recorder;
+use engine::logger;
 use engine::EngineOutput;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 fn main() {
+    let args = RecordArgs::parse(std::env::args_os());
+
+    // Initialize logging before anything else
+    logger::start_for_exe(&args);
+
     let mut output = EngineOutput::default();
 
     let continue_recording = Arc::new(AtomicBool::new(true));
@@ -44,7 +50,7 @@ fn main() {
 
     // Record.
     let mut recorder = Recorder::new(
-        RecordArgs::parse(std::env::args_os()),
+        args,
         output);
 
     let exit_code = recorder.run();
