@@ -1297,7 +1297,7 @@ impl OSDotNetEventFactory {
                         let filename = fmt.get_str(filename, data)?;
 
                         /* Check if dotnet process */
-                        if filename.starts_with("/memfd:doublemapper") {
+                        if filename.starts_with("/memfd:doublemapper") || filename.starts_with("/memfd:dotnet_ipc_created") {
                             /* Attempt to track, will check diag sock, etc */
                             tracker.borrow_mut().track(pid)?;
                         }
@@ -1453,7 +1453,7 @@ impl DotNetHelp for RingBufSessionBuilder {
                         let filename = fmt.get_str(filename, data)?;
 
                         /* Check if dotnet process */
-                        if filename.starts_with("/memfd:doublemapper") {
+                        if filename.starts_with("/memfd:doublemapper") || filename.starts_with("/memfd:dotnet_ipc_created") {
                             /* Attempt to track, will check diag sock, etc */
                             perfmap.borrow_mut().track(pid)?;
                         }
