@@ -36,12 +36,6 @@ use crate::helpers::dotnet::nettrace;
 
 use tracing::{warn, info, debug};
 
-#[cfg(target_os = "linux")]
-use libc::PROT_EXEC;
-
-#[cfg(not(target_os = "linux"))]
-const PROT_EXEC: i32 = 0;
-
 /* Checks if the given filename indicates a .NET runtime memfd mapping.
  *
  * .NET 10+ create a read-execute memfd mapping called dotnet_ipc_created to notify
@@ -1297,13 +1291,6 @@ impl OSDotNetEventFactory {
                         let fmt = data.format();
                         let data = data.event_data();
 
-                        let prot = fmt.get_u32(prot, data)? as i32;
-
-                        /* Skip non-executable mmaps */
-                        if prot & PROT_EXEC != PROT_EXEC {
-                            return Ok(());
-                        }
-
                         let pid = fmt.get_u32(pid, data)?;
                         let filename = fmt.get_str(filename, data)?;
 
@@ -1452,13 +1439,6 @@ impl DotNetHelp for RingBufSessionBuilder {
                     event.add_callback(move |data| {
                         let fmt = data.format();
                         let data = data.event_data();
-
-                        let prot = fmt.get_u32(prot, data)? as i32;
-
-                        /* Skip non-executable mmaps */
-                        if prot & PROT_EXEC != PROT_EXEC {
-                            return Ok(());
-                        }
 
                         let pid = fmt.get_u32(pid, data)?;
                         let filename = fmt.get_str(filename, data)?;
