@@ -42,6 +42,17 @@ use libc::PROT_EXEC;
 #[cfg(not(target_os = "linux"))]
 const PROT_EXEC: i32 = 0;
 
+/* Checks if the given filename indicates a .NET runtime memfd mapping.
+ *
+ * .NET 10+ create a read-execute memfd mapping called dotnet_ipc_created to notify
+ * consumers that the IPC channel is available.
+ * Looking for "doublemapper" is a best-effort approach since it's an
+ * implementation detail of the R^X implementation in CoreCLR and is configurable. */
+fn is_dotnet_memfd_mapping(filename: &str) -> bool {
+    filename.starts_with("/memfd:dotnet_ipc_created") ||
+    filename.starts_with("/memfd:doublemapper")
+}
+
 struct PerfMapContext {
     tmp: OpenAt,
     pid: u32,
@@ -1297,7 +1308,7 @@ impl OSDotNetEventFactory {
                         let filename = fmt.get_str(filename, data)?;
 
                         /* Check if dotnet process */
-                        if filename.starts_with("/memfd:doublemapper") || filename.starts_with("/memfd:dotnet_ipc_created") {
+                        if is_dotnet_memfd_mapping(filename) {
                             /* Attempt to track, will check diag sock, etc */
                             tracker.borrow_mut().track(pid)?;
                         }
@@ -1453,7 +1464,7 @@ impl DotNetHelp for RingBufSessionBuilder {
                         let filename = fmt.get_str(filename, data)?;
 
                         /* Check if dotnet process */
-                        if filename.starts_with("/memfd:doublemapper") || filename.starts_with("/memfd:dotnet_ipc_created") {
+                        if is_dotnet_memfd_mapping(filename) {
                             /* Attempt to track, will check diag sock, etc */
                             perfmap.borrow_mut().track(pid)?;
                         }
