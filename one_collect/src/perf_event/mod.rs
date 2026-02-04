@@ -1209,7 +1209,7 @@ impl PerfSession {
         let mut module_count = 0;
 
         procfs::iter_modules(move |pid, module| {
-            if !module.is_exec() || module.path.is_none() {
+            if module.path.is_none() {
                 return;
             }
 
