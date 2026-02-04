@@ -1296,6 +1296,7 @@ impl OSDotNetEventFactory {
 
                         /* Check if dotnet process */
                         if is_dotnet_memfd_mapping(filename) {
+                            debug!("Found dotnet process {} via mapping {}", pid, filename);
                             /* Attempt to track, will check diag sock, etc */
                             tracker.borrow_mut().track(pid)?;
                         }
@@ -1445,6 +1446,7 @@ impl DotNetHelp for RingBufSessionBuilder {
 
                         /* Check if dotnet process */
                         if is_dotnet_memfd_mapping(filename) {
+                            debug!("Found dotnet process {} via mapping {}", pid, filename);
                             /* Attempt to track, will check diag sock, etc */
                             perfmap.borrow_mut().track(pid)?;
                         }
