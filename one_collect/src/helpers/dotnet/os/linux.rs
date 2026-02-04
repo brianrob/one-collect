@@ -1294,6 +1294,8 @@ impl OSDotNetEventFactory {
                         let pid = fmt.get_u32(pid, data)?;
                         let filename = fmt.get_str(filename, data)?;
 
+                        debug!("Found mapping (PID={}): {}", pid, filename);
+
                         /* Check if dotnet process */
                         if is_dotnet_memfd_mapping(filename) {
                             debug!("Found dotnet process {} via mapping {}", pid, filename);
