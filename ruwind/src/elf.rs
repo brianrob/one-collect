@@ -8,7 +8,7 @@ use std::mem::{zeroed, size_of};
 use std::slice;
 use cpp_demangle::{DemangleOptions, Symbol};
 use rustc_demangle::try_demangle;
-use tracing::{error, warn, info, debug, trace};
+use tracing::{warn, info, debug, trace};
 
 pub const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 
@@ -1266,6 +1266,7 @@ mod tests {
     use crate::elf;
 
     use super::*;
+    #[cfg(target_os = "linux")]
     use std::fs::File;
 
     #[test]

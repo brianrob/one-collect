@@ -20,7 +20,7 @@ impl PartialThreadCallstacks {
         }
     }
 
-    fn flush(&mut self) -> Drain<u64, PartialCallstack> {
+    fn flush(&mut self) -> Drain<'_, u64, PartialCallstack> {
         self.partials.drain()
     }
 
@@ -425,7 +425,7 @@ mod tests {
         let times = profile_times.clone();
 
         event.add_callback(
-            move |data| {
+            move |_data| {
                 times.borrow_mut().insert(ancillary.borrow().time());
                 *count.borrow_mut() += 1;
                 Ok(())
