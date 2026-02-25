@@ -1630,6 +1630,9 @@ impl UniversalExporterOSHooks for UniversalExporter {
             session.disable()?;
             exporter.borrow_mut().mark_end();
 
+            /* Parse any remaining data. */
+            session.parse_all()?;
+
             self.run_parsed_hooks(&exporter)?;
 
             Ok(())
