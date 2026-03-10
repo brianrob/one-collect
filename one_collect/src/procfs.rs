@@ -256,12 +256,8 @@ pub fn ns_pid(
         for line in BufReader::new(file).lines() {
             match line {
                 Ok(line) => {
-                    if line.starts_with("NSpid:\t") {
-                        let (_, value) = line.split_at(7);
-
-                        if let Ok(nspid) = value.parse::<u32>() {
-                            return Some(nspid);
-                        }
+                    if let Some(nspid) = try_parse_nspid_line(&line) {
+                        return Some(nspid);
                     }
                 },
                 Err(_) => { break; },
@@ -270,6 +266,17 @@ pub fn ns_pid(
     }
 
     None
+}
+
+fn try_parse_nspid_line(line: &str) -> Option<u32> {
+    line.strip_prefix("NSpid:\t")
+        .and_then(|value| {
+            value
+                .trim_end()
+                .rsplit('\t')
+                .next()
+                .and_then(|pid| pid.parse::<u32>().ok())
+        })
 }
 
 /// Iterates over the current tasks within a process.
@@ -470,4 +477,27 @@ pub fn iter_processes(mut callback: impl FnMut(u32, &mut PathBuf)) {
                 }
             }
         }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_nspid_line_single_namespace() {
+        assert_eq!(try_parse_nspid_line("NSpid:\t1234"), Some(1234));
+        assert_eq!(try_parse_nspid_line("NSpid:\t1234\n"), Some(1234));
     }
+
+    #[test]
+    fn parse_nspid_line_nested_namespace_uses_innermost_pid() {
+        assert_eq!(try_parse_nspid_line("NSpid:\t1234\t5678"), Some(5678));
+        assert_eq!(try_parse_nspid_line("NSpid:\t1234\t5678\t9012\n"), Some(9012));
+    }
+
+    #[test]
+    fn parse_nspid_line_invalid_or_missing_tag() {
+        assert_eq!(try_parse_nspid_line("Pid:\t1234"), None);
+        assert_eq!(try_parse_nspid_line("NSpid:"), None);
+    }
+}
