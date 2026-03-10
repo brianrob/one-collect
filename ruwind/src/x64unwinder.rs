@@ -115,6 +115,7 @@ impl Unwinder {
         result: &mut UnwindResult) -> Option<u64> {
 
         let cfa = self.registers[REG_RSP];
+        let rbp = self.registers[REG_RBP];
         let len = stack_data.len();
 
         /* Ensure valid enough to start scan */
@@ -127,6 +128,55 @@ impl Unwinder {
 
         /* Limit range to stack size at stack location */
         let max_cfa = cfa + len as u64;
+
+        /*
+         * Try walking the RBP frame pointer chain first.
+         *
+         * Many compilers and runtimes maintain an RBP chain on x64 where
+         * [rbp] = caller's saved RBP and [rbp+8] = return address. If a
+         * function does not push RBP, it simply preserves the register
+         * and is skipped in the chain (equivalent to inlining).
+         *
+         * We follow the chain looking for a link where [rbp+8] is a valid
+         * code address. If [rbp+8] is not valid, we follow [rbp] to the
+         * next chain link. If the chain is absent or corrupted (e.g. RBP
+         * is used as a general-purpose register), the guard checks below
+         * (alignment, forward progress, bounds) will break out and we
+         * fall back to the existing linear scan.
+         */
+        let max_chain_depth = 16;
+        let mut chain_rbp = rbp;
+
+        for _depth in 0..max_chain_depth {
+            let saved_rbp = match Unwinder::stack_value(self.rsp, chain_rbp, 0, stack_data) {
+                Some(v) => v,
+                None => break,
+            };
+
+            let ret_addr = match Unwinder::stack_value(self.rsp, chain_rbp, 8, stack_data) {
+                Some(v) => v,
+                None => break,
+            };
+
+            if process.find(ret_addr).is_some() {
+                trace!("RBP chain walk successful: chain_rbp={:#x}, saved_rbp={:#x}, ret_addr={:#x}, depth={}", chain_rbp, saved_rbp, ret_addr, _depth);
+                self.registers[REG_RSP] = chain_rbp + 16;
+                self.registers[REG_RBP] = saved_rbp;
+                return Some(ret_addr);
+            }
+
+            /* [rbp+8] wasn't a valid return address — follow the chain */
+            if saved_rbp <= chain_rbp || saved_rbp > max_cfa || saved_rbp & 0x7 != 0 {
+                break;
+            }
+
+            chain_rbp = saved_rbp;
+        }
+
+        /*
+         * RBP chain walk didn't find a frame. Fall back to scanning
+         * consecutive stack slots for (stack_address, code_address) pairs.
+         */
 
         /* Determine offset and limit read offset */
         let mut offset = (cfa - self.rsp) as usize;
