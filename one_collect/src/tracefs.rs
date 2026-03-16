@@ -484,16 +484,22 @@ impl TraceFS {
     }
 
     pub fn user_events_factory(&self) -> Result<UserEventsFactory> {
-        let mut path_buf = PathBuf::new();
-
-        path_buf.push(&self.root);
-        path_buf.push("user_events_data");
+        let path_buf = self.user_events_path();
 
         let file = OpenOptions::new()
             .write(true)
             .open(path_buf)?;
 
         Ok(UserEventsFactory::new(file))
+    }
+
+    pub fn user_events_path(&self) -> PathBuf {
+        let mut path_buf = PathBuf::new();
+
+        path_buf.push(&self.root);
+        path_buf.push("user_events_data");
+
+        path_buf
     }
 }
 

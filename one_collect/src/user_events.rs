@@ -17,6 +17,9 @@ use std::os::unix::net::UnixStream;
 #[cfg(target_os = "linux")]
 use libc::*;
 
+#[cfg(target_os = "linux")]
+use crate::tracefs::TraceFS;
+
 pub trait UserEventDesc {
     fn format(&self) -> String;
 }
@@ -272,7 +275,11 @@ impl WithUserEventFD for UnixStream {
         };
 
         unsafe {
-            let path = CString::new("/sys/kernel/tracing/user_events_data")?;
+            let tracefs = TraceFS::open()?;
+            let user_events_path = tracefs.user_events_path();
+
+            let bytes = user_events_path.into_os_string().into_encoded_bytes();
+            let path = CString::new(bytes)?;
 
             let user_fd = libc::open(path.as_ptr(), libc::O_RDWR);
 
