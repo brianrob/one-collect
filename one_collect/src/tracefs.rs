@@ -4,6 +4,7 @@
 use std::io::{Result, Error, BufRead, BufReader, ErrorKind, Write};
 use std::path::PathBuf;
 use std::fs::{File, OpenOptions};
+use std::sync::OnceLock;
 use tracing::{debug, info, warn};
 
 use crate::event::*;
@@ -21,36 +22,51 @@ impl TraceFS {
     ///
     /// A `Result` which is `Ok` if the tracefs is successfully opened, and `Err` otherwise.
     pub fn open() -> Result<TraceFS> {
-        let mounts = File::open("/proc/mounts")?;
-        let reader = BufReader::new(mounts);
+        static TRACEFS_PATH: OnceLock<Option<String>> = OnceLock::new();
 
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let mut parts = line.split_whitespace();
+        let cached_path = TRACEFS_PATH.get_or_init(|| {
+            let Ok(mounts) = File::open("/proc/mounts") else {
+                return None;
+            };
 
-                    /* Format: fsspec path vfstype */
-                    if let Some(path) = parts.nth(1) {
-                        if let Some(fstype) = parts.next() {
-                            if fstype == "tracefs" {
-                                info!("TraceFS found and opened: path={}", path);
-                                return Self::open_at(path);
+            let reader = BufReader::new(mounts);
+
+            for line in reader.lines() {
+                match line {
+                    Ok(line) => {
+                        let mut parts = line.split_whitespace();
+
+                        /* Format: fsspec path vfstype */
+                        if let Some(path) = parts.nth(1) {
+                            if let Some(fstype) = parts.next() {
+                                if fstype == "tracefs" {
+                                    info!("TraceFS found: path={}", path);
+                                    return Some(path.to_string());
+                                }
                             }
                         }
-                    }
-                },
-                Err(_) => { break; },
+                    },
+                    Err(_) => { break; },
+                }
             }
-        }
 
-        warn!("TraceFS not mounted");
-        Err(
-            Error::new(
-                ErrorKind::Other,
-                concat!(
-                    "It appears tracefs is not mounted. ",
-                    "You can mount it by running ",
-                    "mount -t tracefs nodev /sys/kernel/tracing.")))
+            warn!("TraceFS not mounted");
+            None
+        });
+
+        match cached_path {
+            Some(path) => {
+                info!("TraceFS opening: path={}", path);
+                Self::open_at(path)
+            },
+            None => Err(
+                Error::new(
+                    ErrorKind::Other,
+                    concat!(
+                        "It appears tracefs is not mounted. ",
+                        "You can mount it by running ",
+                        "mount -t tracefs nodev /sys/kernel/tracing."))),
+        }
     }
 
     /// Opens the trace file system at the given path and returns a `TraceFS` instance.
