@@ -1294,9 +1294,15 @@ impl NetTraceWriter {
         let strings = machine.strings();
         let activity_str_id = strings.find_id("ActivityId").unwrap_or(0);
         let related_activity_str_id = strings.find_id("RelatedActivityId").unwrap_or(0);
+        let version_str_id = strings.find_id("Version").unwrap_or(0);
+        let op_code_str_id = strings.find_id("OpCode").unwrap_or(0);
+        let trace_id_str_id = strings.find_id("TraceId").unwrap_or(0);
+        let span_id_str_id = strings.find_id("SpanId").unwrap_or(0);
 
         let fn_activity_str_id = activity_str_id;
         let fn_related_activity_str_id = related_activity_str_id;
+        let fn_trace_id_str_id = trace_id_str_id;
+        let fn_span_id_str_id = span_id_str_id;
 
         let mut walker = ExportAttributeWalker::default()
             .with_filter(move |attribute| {
@@ -1310,7 +1316,9 @@ impl NetTraceWriter {
                         }
 
                         if attribute.name() == fn_activity_str_id ||
-                            attribute.name() == fn_related_activity_str_id {
+                            attribute.name() == fn_related_activity_str_id ||
+                            attribute.name() == fn_trace_id_str_id ||
+                            attribute.name() == fn_span_id_str_id {
                             return true;
                         }
 
@@ -1360,9 +1368,19 @@ impl NetTraceWriter {
                         self.output.write_utf8(value)?;
                     },
                     ExportAttributeValue::Value(value) => {
-                        self.output.write_u8(add_flag | 6)?;
-                        self.output.write_utf8(name)?;
-                        self.output.write_varint(value)?;
+                        if attribute.name() == op_code_str_id {
+                            /* Kind 7: OpCode */
+                            self.output.write_u8(add_flag | 7)?;
+                            self.output.write_u8(value as u8)?;
+                        } else if attribute.name() == version_str_id {
+                            /* Kind 10: Version */
+                            self.output.write_u8(add_flag | 10)?;
+                            self.output.write_u8(value as u8)?;
+                        } else {
+                            self.output.write_u8(add_flag | 6)?;
+                            self.output.write_utf8(name)?;
+                            self.output.write_varint(value)?;
+                        }
                     },
                     ExportAttributeValue::Record(id) => {
                         let record = machine.try_get_record_data(id).unwrap_or_default();
@@ -1378,7 +1396,19 @@ impl NetTraceWriter {
                                 self.output.write_u8(add_flag | 2)?;
                                 self.output.write_all(record)?;
                                 written = true;
+                            } else if attribute.name() == trace_id_str_id {
+                                /* Kind 3: TraceId */
+                                self.output.write_u8(add_flag | 3)?;
+                                self.output.write_all(record)?;
+                                written = true;
                             }
+                        }
+
+                        if record.len() == 8 && attribute.name() == span_id_str_id {
+                            /* Kind 4: SpanId */
+                            self.output.write_u8(add_flag | 4)?;
+                            self.output.write_all(record)?;
+                            written = true;
                         }
 
                         if !written {
