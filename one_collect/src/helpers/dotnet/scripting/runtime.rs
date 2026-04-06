@@ -403,6 +403,10 @@ impl DotNetScenario {
                         "Address".into(), "u64".into(),
                         LocationType::Static, offset, len));
 
+                    format.add_field(EventField::new(
+                        "ObjectSize".into(), "u64".into(),
+                        LocationType::Static, offset, len));
+
                     DotNetSample {
                         event,
                         sample_value: Box::new(move |data| {
