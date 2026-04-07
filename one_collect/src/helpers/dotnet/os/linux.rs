@@ -1493,10 +1493,11 @@ mod tests {
         let mut session = builder.build().unwrap();
         let duration = std::time::Duration::from_secs(1);
 
-        session.capture_environment();
         session.enable().unwrap();
+        let env_handle = session.spawn_capture_environment();
         session.parse_for_duration(duration).unwrap();
         session.disable().unwrap();
+        if let Some(h) = env_handle { let _ = h.join(); }
 
         helper.disable_perf_maps();
         helper.remove_perf_maps();

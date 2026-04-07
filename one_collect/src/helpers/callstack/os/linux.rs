@@ -851,9 +851,10 @@ mod tests {
             Ok(())
         });
 
-        session.capture_environment();
         session.enable().unwrap();
+        let env_handle = session.spawn_capture_environment();
         session.parse_for_duration(duration).unwrap();
         session.disable().unwrap();
+        if let Some(h) = env_handle { let _ = h.join(); }
     }
 }
