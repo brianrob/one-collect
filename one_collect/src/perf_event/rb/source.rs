@@ -441,6 +441,9 @@ pub struct RingBufDataSource {
     hard_page_faults_builder: Option<RingBufBuilder<PageFaults>>,
     next_time: Option<u64>,
     oldest_cpu: Option<usize>,
+    in_process_ring_buf: Option<InProcessRingBuf>,
+    in_process_reader: Option<CpuRingReader>,
+    in_process_cursor: Option<CpuRingCursor>,
 }
 
 impl RingBufDataSource {
@@ -474,6 +477,9 @@ impl RingBufDataSource {
             next_time: None,
             oldest_cpu: None,
             enabled: false,
+            in_process_ring_buf: None,
+            in_process_reader: None,
+            in_process_cursor: None,
         }
     }
 
@@ -733,6 +739,14 @@ impl RingBufDataSource {
                 }
             }
         }
+
+        /* Create in-process ring buffer for capture_environment */
+        let mut in_process = InProcessRingBuf::new(self.pages);
+        let reader = in_process.create_reader();
+
+        self.in_process_ring_buf = Some(in_process);
+        self.in_process_reader = Some(reader);
+        self.in_process_cursor = Some(CpuRingCursor::default());
 
         info!(
             "RingBufDataSource built successfully: ring_buf_count={}, reader_count={}",
@@ -1096,6 +1110,45 @@ impl PerfDataSource for RingBufDataSource {
         }
 
         self.enabled
+    }
+
+    fn take_in_process_writer(
+        &mut self) -> Option<InProcessRingBufWriter> {
+        self.in_process_ring_buf.as_mut().map(|rb| rb.writer())
+    }
+
+    fn read_in_process(
+        &mut self) -> Option<PerfData<'_>> {
+        let reader = self.in_process_reader.as_ref()?;
+        let cursor = self.in_process_cursor.as_mut()?;
+
+        if !cursor.more() {
+            reader.begin_reading(cursor);
+
+            if !cursor.more() {
+                return None;
+            }
+        }
+
+        let attributes = Rc::new(RingBufBuilder::common_attributes());
+
+        match reader.read(cursor, &mut self.temp) {
+            Ok(raw_data) if !raw_data.is_empty() => {
+                trace!(
+                    "read_in_process: read {} bytes from in-process ring buffer",
+                    raw_data.len()
+                );
+
+                Some(PerfData {
+                    ancillary: AncillaryData {
+                        cpu: 0,
+                        attributes,
+                    },
+                    raw_data,
+                })
+            },
+            _ => None,
+        }
     }
 }
 

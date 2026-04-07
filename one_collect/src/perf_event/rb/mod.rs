@@ -541,6 +541,7 @@ pub(crate) struct CpuRingReader {
     data_offset: u64,
     data_size: u64,
     data_mask: u64,
+    owned: bool,
 }
 
 impl<'a> CpuRingReader {
@@ -570,7 +571,16 @@ impl<'a> CpuRingReader {
             data_offset,
             data_size,
             data_mask: data_size - 1,
+            owned: true,
         }
+    }
+
+    pub fn new_unowned(
+        pages: *mut u8,
+        pages_len: usize) -> Self {
+        let mut reader = Self::new(pages, pages_len);
+        reader.owned = false;
+        reader
     }
 
     fn slice(&self) -> &[u8] {
@@ -705,8 +715,10 @@ impl<'a> CpuRingReader {
 
 impl Drop for CpuRingReader {
     fn drop(&mut self) {
-        unsafe {
-            munmap(self.pages as *mut c_void, self.pages_len);
+        if self.owned {
+            unsafe {
+                munmap(self.pages as *mut c_void, self.pages_len);
+            }
         }
     }
 }
@@ -958,6 +970,174 @@ impl Drop for CpuRingBuf {
     }
 }
 
+/// A ring buffer backed by user-space memory instead of kernel memory.
+///
+/// This struct uses the same memory layout as the kernel's perf ring buffer,
+/// allowing it to be read by `CpuRingReader`. It is used during
+/// `capture_environment` so that synthetic events (COMM, MMAP2) can be
+/// written from a background thread while the main parse loop reads them
+/// alongside real kernel events.
+pub(crate) struct InProcessRingBuf {
+    data: Vec<u8>,
+    data_offset: usize,
+    data_size: usize,
+    data_mask: usize,
+    head: usize,
+}
+
+/// Writer half of an `InProcessRingBuf`.
+///
+/// This is `Send` so it can be moved to another thread. The writer
+/// appends perf-event records and updates the head pointer with the
+/// appropriate memory barriers so a concurrent `CpuRingReader` sees the
+/// data.
+pub struct InProcessRingBufWriter {
+    data: *mut u8,
+    data_offset: usize,
+    data_size: usize,
+    data_mask: usize,
+    head: usize,
+}
+
+// SAFETY: InProcessRingBufWriter only writes to memory via raw pointer.
+// The ring buffer protocol (single writer, single reader, memory barriers)
+// ensures safe concurrent access with a CpuRingReader on another thread.
+unsafe impl Send for InProcessRingBufWriter {}
+
+impl InProcessRingBuf {
+    /// Create a new in-process ring buffer with the given number of data pages.
+    /// The data_pages value will be rounded up to the next power of two.
+    pub fn new(data_pages: usize) -> Self {
+        let page_size = unsafe { sysconf(_SC_PAGE_SIZE) as usize };
+        let data_pages = data_pages.next_power_of_two();
+        let data_size = data_pages * page_size;
+        let data_offset = page_size; /* first page is metadata */
+        let total_size = data_offset + data_size;
+
+        let mut data = vec![0u8; total_size];
+
+        /* Set data_offset at byte 1040 */
+        data[1040..1048].copy_from_slice(
+            &(data_offset as u64).to_ne_bytes());
+
+        /* Set data_size at byte 1048 */
+        data[1048..1056].copy_from_slice(
+            &(data_size as u64).to_ne_bytes());
+
+        debug!(
+            "InProcessRingBuf created: data_pages={}, data_size={:#x}, total_size={:#x}",
+            data_pages, data_size, total_size
+        );
+
+        Self {
+            data,
+            data_offset,
+            data_size,
+            data_mask: data_size - 1,
+            head: 0,
+        }
+    }
+
+    /// Write a complete perf event record into the ring buffer.
+    pub fn write(&mut self, record: &[u8]) {
+        let write_pos = self.head & self.data_mask;
+        let start = self.data_offset;
+
+        if write_pos + record.len() <= self.data_size {
+            /* Fits without wrapping */
+            self.data[start + write_pos .. start + write_pos + record.len()]
+                .copy_from_slice(record);
+        } else {
+            /* Wraps around */
+            let first_part = self.data_size - write_pos;
+            self.data[start + write_pos .. start + self.data_size]
+                .copy_from_slice(&record[..first_part]);
+            let remaining = record.len() - first_part;
+            self.data[start .. start + remaining]
+                .copy_from_slice(&record[first_part..]);
+        }
+
+        self.head += record.len();
+
+        /* Memory barrier then update head so the reader sees the data */
+        unsafe { mb(); }
+        self.data[1024..1032].copy_from_slice(
+            &(self.head as u64).to_ne_bytes());
+
+        trace!(
+            "InProcessRingBuf::write: record_len={}, head={:#x}",
+            record.len(), self.head
+        );
+    }
+
+    /// Create a `CpuRingReader` that reads from this buffer's memory.
+    /// The reader does NOT own the memory.
+    pub fn create_reader(&mut self) -> CpuRingReader {
+        CpuRingReader::new_unowned(
+            self.data.as_mut_ptr(),
+            self.data.len())
+    }
+
+    /// Split into a writer (movable to another thread) and a reader.
+    /// The writer and reader share the underlying memory.
+    ///
+    /// # Safety
+    /// The returned `InProcessRingBufWriter` holds a raw pointer into
+    /// `self.data`. The caller must ensure that `self` outlives both the
+    /// writer and the reader.
+    pub fn writer(&mut self) -> InProcessRingBufWriter {
+        InProcessRingBufWriter {
+            data: self.data.as_mut_ptr(),
+            data_offset: self.data_offset,
+            data_size: self.data_size,
+            data_mask: self.data_mask,
+            head: self.head,
+        }
+    }
+}
+
+impl InProcessRingBufWriter {
+    /// Write a complete perf event record into the ring buffer.
+    pub fn write(&mut self, record: &[u8]) {
+        let write_pos = self.head & self.data_mask;
+
+        unsafe {
+            let dest = self.data.add(self.data_offset);
+
+            if write_pos + record.len() <= self.data_size {
+                /* Fits without wrapping */
+                std::ptr::copy_nonoverlapping(
+                    record.as_ptr(),
+                    dest.add(write_pos),
+                    record.len());
+            } else {
+                /* Wraps around */
+                let first_part = self.data_size - write_pos;
+                std::ptr::copy_nonoverlapping(
+                    record.as_ptr(),
+                    dest.add(write_pos),
+                    first_part);
+                std::ptr::copy_nonoverlapping(
+                    record.as_ptr().add(first_part),
+                    dest,
+                    record.len() - first_part);
+            }
+
+            self.head += record.len();
+
+            /* Memory barrier then update head so the reader sees the data */
+            mb();
+            let head_ptr = self.data.add(1024) as *mut u64;
+            std::ptr::write_volatile(head_ptr, self.head as u64);
+        }
+
+        trace!(
+            "InProcessRingBufWriter::write: record_len={}, head={:#x}",
+            record.len(), self.head
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1137,5 +1317,101 @@ mod tests {
         rb.open(pid).unwrap();
         rb.redirect_to(&rb_head).unwrap();
         rb.enable().unwrap();
+    }
+
+    #[test]
+    fn in_process_ring_buf_write_read() {
+        let mut temp = Vec::new();
+
+        /* Create an in-process ring buffer with 1 data page */
+        let mut ring_buf = InProcessRingBuf::new(1);
+
+        /* Write three records using abi::Header format */
+        let mut record = Vec::new();
+        abi::Header::write(1024, 0, &1u64.to_ne_bytes(), &mut record);
+        ring_buf.write(&record);
+
+        record.clear();
+        abi::Header::write(1024, 0, &2u64.to_ne_bytes(), &mut record);
+        ring_buf.write(&record);
+
+        record.clear();
+        abi::Header::write(1024, 0, &3u64.to_ne_bytes(), &mut record);
+        ring_buf.write(&record);
+
+        /* Create a reader from the ring buffer */
+        let mut reader = ring_buf.create_reader();
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+
+        assert!(cursor.more());
+
+        /* Read record 1 */
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(16, header.size);
+        assert_eq!(1, u64::from_ne_bytes(read[8..16].try_into().unwrap()));
+
+        /* Read record 2 */
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(16, header.size);
+        assert_eq!(2, u64::from_ne_bytes(read[8..16].try_into().unwrap()));
+
+        /* Read record 3 */
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(16, header.size);
+        assert_eq!(3, u64::from_ne_bytes(read[8..16].try_into().unwrap()));
+
+        /* No more data */
+        assert!(!cursor.more());
+
+        reader.end_reading(&cursor);
+    }
+
+    #[test]
+    fn in_process_ring_buf_writer_threaded() {
+        let mut temp = Vec::new();
+        let mut ring_buf = InProcessRingBuf::new(1);
+
+        /* Get the reader before spawning the writer thread */
+        let mut reader = ring_buf.create_reader();
+
+        /* Get a writer and move it to another thread */
+        let mut writer = ring_buf.writer();
+
+        let handle = std::thread::spawn(move || {
+            let mut record = Vec::new();
+            for i in 1u64..=5 {
+                record.clear();
+                abi::Header::write(1024, 0, &i.to_ne_bytes(), &mut record);
+                writer.write(&record);
+            }
+        });
+
+        handle.join().unwrap();
+
+        /* Reader should see all 5 records */
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+
+        assert!(cursor.more());
+
+        for expected in 1u64..=5 {
+            let read = reader.read(&mut cursor, &mut temp).unwrap();
+            let header = abi::Header::from_slice(read).unwrap();
+            assert_eq!(1024, header.entry_type);
+            assert_eq!(16, header.size);
+            assert_eq!(
+                expected,
+                u64::from_ne_bytes(read[8..16].try_into().unwrap()));
+        }
+
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
     }
 }

@@ -218,6 +218,15 @@ pub trait PerfDataSource {
     fn end_reading(&mut self);
 
     fn more(&self) -> bool;
+
+    /// Take the in-process ring buffer writer for use by capture_environment.
+    /// Returns None if no in-process ring buffer is available.
+    fn take_in_process_writer(
+        &mut self) -> Option<rb::InProcessRingBufWriter> { None }
+
+    /// Read the next event from the in-process ring buffer, if any.
+    fn read_in_process(
+        &mut self) -> Option<PerfData<'_>> { None }
 }
 
 pub struct PerfSession {
@@ -1124,6 +1133,9 @@ impl PerfSession {
 
             self.source.end_reading();
 
+            /* Drain any pending in-process events */
+            self.parse_in_process()?;
+
             if should_stop() || !self.source.more() {
                 break;
             }
@@ -1305,6 +1317,194 @@ impl PerfSession {
         });
 
         info!("capture_environment_modules completed: module_count={}", module_count);
+    }
+
+    /// Spawn capture_environment sub-methods in a background thread.
+    ///
+    /// The sub-methods write synthetic COMM and MMAP2 records into the
+    /// in-process ring buffer which is drained by `parse_in_process`.
+    /// Returns `None` when no in-process writer is available (falls back
+    /// to the synchronous path in that case).
+    pub fn spawn_capture_environment(
+        &mut self) -> Option<std::thread::JoinHandle<()>> {
+        let mut writer = self.source.take_in_process_writer()?;
+
+        let mut pid_lookup = None;
+
+        if let Some(pids) = self.source.target_pids() {
+            let mut lookup = HashSet::new();
+
+            for pid in pids {
+                lookup.insert(*pid);
+            }
+
+            debug!("spawn_capture_environment: filtering by {} target PIDs", lookup.len());
+            pid_lookup = Some(lookup);
+        }
+
+        let captures_all = self.capture_env_options.all_mmaps();
+
+        let handle = std::thread::spawn(move || {
+            debug!("capture_environment thread: starting");
+            Self::write_environment_comms(&pid_lookup, &mut writer);
+            Self::write_environment_modules(&pid_lookup, captures_all, &mut writer);
+            info!("capture_environment thread: completed");
+        });
+
+        Some(handle)
+    }
+
+    /// Write COMM records for all matching processes into the ring buffer.
+    fn write_environment_comms(
+        pid_lookup: &Option<HashSet<i32>>,
+        writer: &mut rb::InProcessRingBufWriter) {
+        debug!(
+            "write_environment_comms: starting, pid_filter={}",
+            pid_lookup.is_some()
+        );
+
+        let attributes = RingBufBuilder::common_attributes();
+        let mut event_data: Vec<u8> = Vec::new();
+        let mut full_data: Vec<u8> = Vec::new();
+
+        let id_bytes = 0u64.to_ne_bytes();
+        let mut comm_count = 0;
+
+        procfs::iter_processes(|pid, path_buf| {
+            if let Some(pid_lookup) = &pid_lookup {
+                if !pid_lookup.contains(&(pid as i32)) {
+                    return;
+                }
+            }
+
+            let comm = procfs::get_comm(path_buf)
+                .unwrap_or(String::new());
+
+            event_data.clear();
+            full_data.clear();
+
+            let pid_bytes = pid.to_ne_bytes();
+            event_data.extend_from_slice(&pid_bytes);
+            event_data.extend_from_slice(&pid_bytes);
+            event_data.extend_from_slice(comm.as_bytes());
+            event_data.push(0);
+
+            event_data.extend_from_slice(&pid_bytes);
+            event_data.extend_from_slice(&pid_bytes);
+
+            let capture_time = rb::perf_timestamp(&attributes);
+            event_data.extend_from_slice(&capture_time.to_ne_bytes());
+            event_data.extend_from_slice(&id_bytes);
+
+            abi::Header::write(PERF_RECORD_COMM, 0, &event_data, &mut full_data);
+
+            writer.write(&full_data);
+            comm_count += 1;
+        });
+
+        info!("write_environment_comms completed: comm_count={}", comm_count);
+    }
+
+    /// Write MMAP2 records for all matching modules into the ring buffer.
+    fn write_environment_modules(
+        pid_lookup: &Option<HashSet<i32>>,
+        captures_all: bool,
+        writer: &mut rb::InProcessRingBufWriter) {
+        debug!(
+            "write_environment_modules: starting, pid_filter={}",
+            pid_lookup.is_some()
+        );
+
+        let attributes = RingBufBuilder::common_attributes();
+        let mut event_data: Vec<u8> = Vec::new();
+        let mut full_data: Vec<u8> = Vec::new();
+
+        let gen_bytes = 0u64.to_ne_bytes();
+        let prot_bytes = 4u32.to_ne_bytes();
+        let flag_bytes = 0u32.to_ne_bytes();
+        let id_bytes = 0u64.to_ne_bytes();
+        let mut module_count = 0;
+
+        procfs::iter_modules(|pid, module| {
+            if module.path.is_none() {
+                return;
+            }
+
+            if !captures_all && !module.is_exec() {
+                return;
+            }
+
+            if let Some(pid_lookup) = &pid_lookup {
+                if !pid_lookup.contains(&(pid as i32)) {
+                    return;
+                }
+            }
+
+            let path = module.path.unwrap();
+
+            event_data.clear();
+            full_data.clear();
+
+            let pid_bytes = pid.to_ne_bytes();
+            event_data.extend_from_slice(&pid_bytes);
+            event_data.extend_from_slice(&pid_bytes);
+            event_data.extend_from_slice(&module.start_addr.to_ne_bytes());
+            event_data.extend_from_slice(&module.len().to_ne_bytes());
+            event_data.extend_from_slice(&module.offset.to_ne_bytes());
+            event_data.extend_from_slice(&module.dev_maj.to_ne_bytes());
+            event_data.extend_from_slice(&module.dev_min.to_ne_bytes());
+            event_data.extend_from_slice(&module.ino.to_ne_bytes());
+            event_data.extend_from_slice(&gen_bytes);
+            event_data.extend_from_slice(&prot_bytes);
+            event_data.extend_from_slice(&flag_bytes);
+            event_data.extend_from_slice(path.as_bytes());
+            event_data.push(0);
+
+            let capture_time = rb::perf_timestamp(&attributes);
+            event_data.extend_from_slice(&capture_time.to_ne_bytes());
+            event_data.extend_from_slice(&id_bytes);
+
+            abi::Header::write(PERF_RECORD_MMAP2, 0, &event_data, &mut full_data);
+
+            writer.write(&full_data);
+            module_count += 1;
+        });
+
+        info!("write_environment_modules completed: module_count={}", module_count);
+    }
+
+    /// Drain all pending events from the in-process ring buffer.
+    pub fn parse_in_process(
+        &mut self) -> Result<(), TryFromSliceError> {
+        let mut buf = Vec::new();
+        let attributes = Rc::new(RingBufBuilder::common_attributes());
+
+        loop {
+            /* Read and copy in-process data to release the source borrow */
+            buf.clear();
+            let has_data = if let Some(perf_data) = self.source.read_in_process() {
+                buf.extend_from_slice(perf_data.raw_data);
+                true
+            } else {
+                false
+            };
+
+            if !has_data {
+                break;
+            }
+
+            let perf_data = PerfData {
+                ancillary: AncillaryData {
+                    cpu: 0,
+                    attributes: attributes.clone(),
+                },
+                raw_data: &buf,
+            };
+
+            self.parse_perf_data(Some(perf_data))?;
+        }
+
+        Ok(())
     }
 
     pub fn capture_environment(&mut self) {

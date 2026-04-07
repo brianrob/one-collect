@@ -1697,16 +1697,26 @@ impl UniversalExporterOSHooks for UniversalExporter {
         let os_parse_loop = || {
             self.run_export_hooks(&exporter)?;
 
-            session.capture_environment();
-
             exporter.borrow_mut().mark_start();
             session.enable()?;
+
+            /* Spawn capture_environment in a background thread so that
+             * the ring buffers are already enabled when .NET diagnostic
+             * commands trigger runtime events (see issue #243). */
+            let env_handle = session.spawn_capture_environment();
+
             session.parse_until(until)?;
             session.disable()?;
             exporter.borrow_mut().mark_end();
 
-            /* Parse any remaining data. */
+            /* Wait for the background capture to finish, if started */
+            if let Some(handle) = env_handle {
+                let _ = handle.join();
+            }
+
+            /* Parse any remaining data including in-process events. */
             session.parse_all()?;
+            session.parse_in_process()?;
 
             self.run_parsed_hooks(&exporter)?;
 
