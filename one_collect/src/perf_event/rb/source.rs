@@ -765,6 +765,9 @@ impl RingBufDataSource {
         debug!("RingBufDataSource::enable: enabling {} ring buffers", self.ring_bufs.len());
 
         for rb in self.ring_bufs.values() {
+            if !rb.is_open() {
+                continue;
+            }
             rb.enable()?;
         }
 
@@ -779,6 +782,9 @@ impl RingBufDataSource {
         debug!("RingBufDataSource::disable: disabling {} ring buffers", self.ring_bufs.len());
 
         for rb in self.ring_bufs.values() {
+            if !rb.is_open() {
+                continue;
+            }
             rb.disable()?;
         }
 

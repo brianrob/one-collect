@@ -807,6 +807,10 @@ impl CpuRingBuf {
         self.id
     }
 
+    pub fn is_open(&self) -> bool {
+        self.fd.is_some()
+    }
+
     pub fn open(
         &mut self,
         target_pid: Option<i32>) -> IOResult<()> {
