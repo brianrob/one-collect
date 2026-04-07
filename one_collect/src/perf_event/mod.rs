@@ -223,10 +223,6 @@ pub trait PerfDataSource {
     /// Returns None if no in-process ring buffer is available.
     fn take_in_process_writer(
         &mut self) -> Option<rb::InProcessRingBufWriter> { None }
-
-    /// Read the next event from the in-process ring buffer, if any.
-    fn read_in_process(
-        &mut self) -> Option<PerfData<'_>> { None }
 }
 
 pub struct PerfSession {
@@ -1133,9 +1129,6 @@ impl PerfSession {
 
             self.source.end_reading();
 
-            /* Drain any pending in-process events */
-            self.parse_in_process()?;
-
             if should_stop() || !self.source.more() {
                 break;
             }
@@ -1322,7 +1315,8 @@ impl PerfSession {
     /// Spawn capture_environment sub-methods in a background thread.
     ///
     /// The sub-methods write synthetic COMM and MMAP2 records into the
-    /// in-process ring buffer which is drained by `parse_in_process`.
+    /// in-process ring buffer which is read by the normal source alongside
+    /// kernel events, ensuring all items are processed in time order.
     /// Returns `None` when no in-process writer is available (falls back
     /// to the synchronous path in that case).
     pub fn spawn_capture_environment(
@@ -1471,61 +1465,6 @@ impl PerfSession {
         });
 
         info!("write_environment_modules completed: module_count={}", module_count);
-    }
-
-    /// Drain pending events from the in-process ring buffer up to the
-    /// current time.  This prevents the loop from running forever when
-    /// the background writer is continuously appending new records.
-    pub fn parse_in_process(
-        &mut self) -> Result<(), TryFromSliceError> {
-        let mut buf = Vec::new();
-        let attributes = Rc::new(RingBufBuilder::common_attributes());
-
-        /* Snapshot the current time so we only process records
-         * written before this point. */
-        let cutoff = rb::perf_timestamp(&attributes);
-
-        loop {
-            /* Read and copy in-process data to release the source borrow */
-            buf.clear();
-            let has_data = if let Some(perf_data) = self.source.read_in_process() {
-                buf.extend_from_slice(perf_data.raw_data);
-                true
-            } else {
-                false
-            };
-
-            if !has_data {
-                break;
-            }
-
-            /* Extract time from the record and stop if it is past the
-             * cutoff.  Non-sample records written by capture_environment
-             * store the sample-id-all trailer at the end:
-             *   [tid:4][tid:4][time:8][identifier:8]
-             * so the time sits 16 bytes before the end of the record. */
-            if buf.len() >= 16 {
-                let time_offset = buf.len() - 16;
-                if let Ok(bytes) = buf[time_offset..time_offset + 8].try_into() {
-                    let record_time = u64::from_ne_bytes(bytes);
-                    if record_time > cutoff {
-                        break;
-                    }
-                }
-            }
-
-            let perf_data = PerfData {
-                ancillary: AncillaryData {
-                    cpu: 0,
-                    attributes: attributes.clone(),
-                },
-                raw_data: &buf,
-            };
-
-            self.parse_perf_data(Some(perf_data))?;
-        }
-
-        Ok(())
     }
 
     pub fn capture_environment(&mut self) {
@@ -1808,113 +1747,5 @@ mod tests {
 
         /* Ensure we only saw 1 event and our assert checks ran */
         assert_eq!(count.load(Ordering::Relaxed), 1);
-    }
-
-    /// Mock data source that returns pre-built records from read_in_process.
-    struct MockInProcessData {
-        in_process_data: Vec<u8>,
-        in_process_entries: Vec<(usize, usize)>,
-        in_process_index: usize,
-    }
-
-    impl MockInProcessData {
-        pub fn new() -> Self {
-            Self {
-                in_process_data: Vec::new(),
-                in_process_entries: Vec::new(),
-                in_process_index: 0,
-            }
-        }
-
-        pub fn push_in_process(&mut self, slice: &[u8]) {
-            let entry: (usize, usize) = (self.in_process_data.len(), slice.len());
-            self.in_process_entries.push(entry);
-            self.in_process_data.extend_from_slice(slice);
-        }
-    }
-
-    impl PerfDataSource for MockInProcessData {
-        fn enable(&mut self) -> IOResult<()> { Ok(()) }
-        fn disable(&mut self) -> IOResult<()> { Ok(()) }
-        fn target_pids(&self) -> Option<&[i32]> { None }
-        fn create_bpf_files(&mut self, _event: Option<&Event>) -> IOResult<Vec<PerfDataFile>> {
-            Ok(Vec::new())
-        }
-        fn add_event(&mut self, _event: &Event) -> IOResult<()> { Ok(()) }
-        fn begin_reading(&mut self) { }
-        fn read(&mut self, _timeout: Duration) -> Option<PerfData<'_>> { None }
-        fn end_reading(&mut self) { }
-        fn more(&self) -> bool { false }
-
-        fn read_in_process(&mut self) -> Option<PerfData<'_>> {
-            if self.in_process_index >= self.in_process_entries.len() {
-                return None;
-            }
-
-            let entry = self.in_process_entries[self.in_process_index];
-            self.in_process_index += 1;
-
-            let start = entry.0;
-            let end = start + entry.1;
-            let attr = RingBufBuilder::common_attributes();
-
-            Some(PerfData {
-                ancillary: AncillaryData {
-                    cpu: 0,
-                    attributes: Rc::new(attr),
-                },
-                raw_data: &self.in_process_data[start..end],
-            })
-        }
-    }
-
-    /// Build a fake COMM record with a given timestamp to mimic what
-    /// write_environment_comms produces.
-    fn build_comm_record(pid: u32, time: u64) -> Vec<u8> {
-        let mut event_data: Vec<u8> = Vec::new();
-        let mut full_data: Vec<u8> = Vec::new();
-
-        let pid_bytes = pid.to_ne_bytes();
-        let id_bytes = 0u64.to_ne_bytes();
-
-        /* COMM payload: pid + tid + comm string + null */
-        event_data.extend_from_slice(&pid_bytes);
-        event_data.extend_from_slice(&pid_bytes);
-        event_data.extend_from_slice(b"test\0");
-
-        /* SAMPLE_ID_ALL trailer: tid(4) + tid(4) + time(8) + id(8) */
-        event_data.extend_from_slice(&pid_bytes);
-        event_data.extend_from_slice(&pid_bytes);
-        event_data.extend_from_slice(&time.to_ne_bytes());
-        event_data.extend_from_slice(&id_bytes);
-
-        Header::write(abi::PERF_RECORD_COMM, 0, &event_data, &mut full_data);
-        full_data
-    }
-
-    #[test]
-    fn parse_in_process_stops_at_cutoff() {
-        let mut mock = MockInProcessData::new();
-
-        /* Record 1: time = 100 (should be processed) */
-        let rec1 = build_comm_record(1, 100);
-        mock.push_in_process(&rec1);
-
-        /* Record 2: time = 200 (should be processed) */
-        let rec2 = build_comm_record(2, 200);
-        mock.push_in_process(&rec2);
-
-        /* Record 3: time = u64::MAX (far future, should NOT be processed) */
-        let rec3 = build_comm_record(3, u64::MAX);
-        mock.push_in_process(&rec3);
-
-        let mut session = PerfSession::new(Box::new(mock));
-
-        /* parse_in_process should stop before the u64::MAX record */
-        session.parse_in_process().unwrap();
-
-        /* The mock source should have advanced past records 1 and 2 but
-         * stopped when it saw the future record 3. */
-        assert_eq!(session.source.more(), false);
     }
 }

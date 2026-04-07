@@ -442,8 +442,6 @@ pub struct RingBufDataSource {
     next_time: Option<u64>,
     oldest_cpu: Option<usize>,
     in_process_ring_buf: Option<InProcessRingBuf>,
-    in_process_reader: Option<CpuRingReader>,
-    in_process_cursor: Option<CpuRingCursor>,
 }
 
 impl RingBufDataSource {
@@ -478,8 +476,6 @@ impl RingBufDataSource {
             oldest_cpu: None,
             enabled: false,
             in_process_ring_buf: None,
-            in_process_reader: None,
-            in_process_cursor: None,
         }
     }
 
@@ -740,13 +736,22 @@ impl RingBufDataSource {
             }
         }
 
-        /* Create in-process ring buffer for capture_environment */
+        /* Create in-process ring buffer for capture_environment.
+         * The reader is added to the normal readers/cursors so that
+         * in-process events are processed in time order alongside
+         * kernel events. */
         let mut in_process = InProcessRingBuf::new(self.pages);
         let reader = in_process.create_reader();
 
+        self.readers.push(reader);
+        self.cursors.push(CpuRingCursor::default());
         self.in_process_ring_buf = Some(in_process);
-        self.in_process_reader = Some(reader);
-        self.in_process_cursor = Some(CpuRingCursor::default());
+
+        /* Insert a dummy CpuRingBuf at id=0 so that read_time() can
+         * look up the attributes for in-process records (which use
+         * identifier 0). */
+        let common_attrs = Rc::new(RingBufBuilder::common_attributes());
+        self.ring_bufs.insert(0, CpuRingBuf::new(0, common_attrs));
 
         info!(
             "RingBufDataSource built successfully: ring_buf_count={}, reader_count={}",
@@ -1115,40 +1120,6 @@ impl PerfDataSource for RingBufDataSource {
     fn take_in_process_writer(
         &mut self) -> Option<InProcessRingBufWriter> {
         self.in_process_ring_buf.as_mut().map(|rb| rb.writer())
-    }
-
-    fn read_in_process(
-        &mut self) -> Option<PerfData<'_>> {
-        let reader = self.in_process_reader.as_ref()?;
-        let cursor = self.in_process_cursor.as_mut()?;
-
-        if !cursor.more() {
-            reader.begin_reading(cursor);
-
-            if !cursor.more() {
-                return None;
-            }
-        }
-
-        let attributes = Rc::new(RingBufBuilder::common_attributes());
-
-        match reader.read(cursor, &mut self.temp) {
-            Ok(raw_data) if !raw_data.is_empty() => {
-                trace!(
-                    "read_in_process: read {} bytes from in-process ring buffer",
-                    raw_data.len()
-                );
-
-                Some(PerfData {
-                    ancillary: AncillaryData {
-                        cpu: 0,
-                        attributes,
-                    },
-                    raw_data,
-                })
-            },
-            _ => None,
-        }
     }
 }
 

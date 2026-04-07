@@ -1716,7 +1716,6 @@ impl UniversalExporterOSHooks for UniversalExporter {
 
             /* Parse any remaining data including in-process events. */
             session.parse_all()?;
-            session.parse_in_process()?;
 
             self.run_parsed_hooks(&exporter)?;
 
