@@ -1097,8 +1097,68 @@ impl InProcessRingBuf {
 }
 
 impl InProcessRingBufWriter {
+    /// Maximum time to spin-wait for space to become available (100 ms).
+    const WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+
+    /// Read the current tail value written by the reader.
+    fn tail(&self) -> usize {
+        unsafe {
+            let tail_ptr = self.data.add(1032) as *const u64;
+            std::ptr::read_volatile(tail_ptr) as usize
+        }
+    }
+
+    /// Returns the available space in the data region.
+    fn available(&self) -> usize {
+        let tail = self.tail();
+        self.data_size - (self.head - tail)
+    }
+
+    /// Spin-wait until at least `needed` bytes are available or timeout
+    /// elapses.  Returns `true` if space is available.
+    fn wait_for_space(&self, needed: usize) -> bool {
+        let start = std::time::Instant::now();
+
+        loop {
+            if self.available() >= needed {
+                return true;
+            }
+
+            if start.elapsed() >= Self::WAIT_TIMEOUT {
+                return false;
+            }
+
+            std::thread::yield_now();
+        }
+    }
+
     /// Write a complete perf event record into the ring buffer.
+    /// If not enough space is available after a brief spin-wait, the
+    /// record is dropped and a warning is logged.
     pub fn write(&mut self, record: &[u8]) {
+        if record.len() > self.data_size {
+            warn!(
+                "InProcessRingBufWriter::write: record_len={} exceeds data_size={}, dropping",
+                record.len(), self.data_size
+            );
+            return;
+        }
+
+        if self.available() < record.len() {
+            warn!(
+                "InProcessRingBufWriter::write: insufficient space for record_len={}, waiting",
+                record.len()
+            );
+
+            if !self.wait_for_space(record.len()) {
+                warn!(
+                    "InProcessRingBufWriter::write: timed out waiting for space, dropping record_len={}",
+                    record.len()
+                );
+                return;
+            }
+        }
+
         let write_pos = self.head & self.data_mask;
 
         unsafe {
