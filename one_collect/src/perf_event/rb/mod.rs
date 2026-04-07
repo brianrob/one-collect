@@ -1038,38 +1038,6 @@ impl InProcessRingBuf {
         }
     }
 
-    /// Write a complete perf event record into the ring buffer.
-    pub fn write(&mut self, record: &[u8]) {
-        let write_pos = self.head & self.data_mask;
-        let start = self.data_offset;
-
-        if write_pos + record.len() <= self.data_size {
-            /* Fits without wrapping */
-            self.data[start + write_pos .. start + write_pos + record.len()]
-                .copy_from_slice(record);
-        } else {
-            /* Wraps around */
-            let first_part = self.data_size - write_pos;
-            self.data[start + write_pos .. start + self.data_size]
-                .copy_from_slice(&record[..first_part]);
-            let remaining = record.len() - first_part;
-            self.data[start .. start + remaining]
-                .copy_from_slice(&record[first_part..]);
-        }
-
-        self.head += record.len();
-
-        /* Memory barrier then update head so the reader sees the data */
-        unsafe { mb(); }
-        self.data[1024..1032].copy_from_slice(
-            &(self.head as u64).to_ne_bytes());
-
-        trace!(
-            "InProcessRingBuf::write: record_len={}, head={:#x}",
-            record.len(), self.head
-        );
-    }
-
     /// Create a `CpuRingReader` that reads from this buffer's memory.
     /// The reader does NOT own the memory.
     pub fn create_reader(&mut self) -> CpuRingReader {
@@ -1128,7 +1096,7 @@ impl InProcessRingBufWriter {
                 return false;
             }
 
-            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 
@@ -1386,21 +1354,24 @@ mod tests {
         /* Create an in-process ring buffer with 1 data page */
         let mut ring_buf = InProcessRingBuf::new(1);
 
+        /* Get writer and reader */
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+
         /* Write three records using abi::Header format */
         let mut record = Vec::new();
         abi::Header::write(1024, 0, &1u64.to_ne_bytes(), &mut record);
-        ring_buf.write(&record);
+        writer.write(&record);
 
         record.clear();
         abi::Header::write(1024, 0, &2u64.to_ne_bytes(), &mut record);
-        ring_buf.write(&record);
+        writer.write(&record);
 
         record.clear();
         abi::Header::write(1024, 0, &3u64.to_ne_bytes(), &mut record);
-        ring_buf.write(&record);
+        writer.write(&record);
 
-        /* Create a reader from the ring buffer */
-        let mut reader = ring_buf.create_reader();
+        /* Read from the ring buffer */
         let mut cursor = CpuRingCursor::default();
         reader.begin_reading(&mut cursor);
 
