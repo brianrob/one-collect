@@ -1709,10 +1709,8 @@ impl UniversalExporterOSHooks for UniversalExporter {
             session.disable()?;
             exporter.borrow_mut().mark_end();
 
-            /* Wait for the background capture to finish, if started */
-            if let Some(handle) = env_handle {
-                let _ = handle.join();
-            }
+            /* Wait for the background capture to finish */
+            let _ = env_handle.join();
 
             /* Parse any remaining data including in-process events. */
             session.parse_all()?;
@@ -1811,7 +1809,7 @@ mod tests {
         let env_handle = session.spawn_capture_environment();
         session.parse_for_duration(duration).unwrap();
         session.disable().unwrap();
-        if let Some(h) = env_handle { let _ = h.join(); }
+        let _ = env_handle.join();
 
         let mut exporter = exporter.borrow_mut();
 

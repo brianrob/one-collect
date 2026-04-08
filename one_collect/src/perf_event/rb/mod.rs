@@ -1449,4 +1449,57 @@ mod tests {
         assert!(!cursor.more());
         reader.end_reading(&cursor);
     }
+
+    #[test]
+    fn in_process_ring_buf_write_wrap() {
+        let mut temp = Vec::new();
+
+        /* Create an in-process ring buffer with 1 data page */
+        let mut ring_buf = InProcessRingBuf::new(1);
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+
+        /* Each record is 16 bytes (8-byte header + 8-byte payload).
+         * Write 255 records to advance head to 4080 bytes, leaving
+         * 16 bytes before the end of the 4096-byte data region. */
+        let mut record = Vec::new();
+        for i in 0u64..255 {
+            record.clear();
+            abi::Header::write(1024, 0, &i.to_ne_bytes(), &mut record);
+            writer.write(&record);
+        }
+
+        /* Read and discard those records, advancing the tail to 4080
+         * so the writer sees enough free space for the next write. */
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+        while cursor.more() {
+            let _ = reader.read(&mut cursor, &mut temp).unwrap();
+        }
+        reader.end_reading(&cursor);
+
+        /* Write a 24-byte record (8-byte header + 16-byte payload).
+         * With head at 4080 and data_size = 4096:
+         *   write_pos = 4080, write_pos + 24 = 4104 > 4096
+         * so the record must wrap around the end of the buffer. */
+        let payload = [0x55u8; 16];
+        record.clear();
+        abi::Header::write(1024, 0, &payload, &mut record);
+        assert_eq!(24, record.len());
+        writer.write(&record);
+
+        /* Read the wrapped record and verify its contents */
+        reader.begin_reading(&mut cursor);
+        assert!(cursor.more());
+
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(24, header.size);
+        assert_eq!(24, read.len());
+        assert_eq!(payload, read[8..24]);
+
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+    }
 }

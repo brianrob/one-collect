@@ -1129,11 +1129,10 @@ impl PerfSession {
     /// The sub-methods write synthetic COMM and MMAP2 records into the
     /// in-process ring buffer which is read by the normal source alongside
     /// kernel events, ensuring all items are processed in time order.
-    /// Returns `None` when no in-process writer is available (falls back
-    /// to the synchronous path in that case).
+    /// If no in-process writer is available the spawned thread is a no-op.
     pub fn spawn_capture_environment(
-        &mut self) -> Option<std::thread::JoinHandle<()>> {
-        let mut writer = self.source.take_in_process_writer()?;
+        &mut self) -> std::thread::JoinHandle<()> {
+        let writer = self.source.take_in_process_writer();
 
         let mut pid_lookup = None;
 
@@ -1150,14 +1149,14 @@ impl PerfSession {
 
         let captures_all = self.capture_env_options.all_mmaps();
 
-        let handle = std::thread::spawn(move || {
-            debug!("capture_environment thread: starting");
-            Self::write_environment_comms(&pid_lookup, &mut writer);
-            Self::write_environment_modules(&pid_lookup, captures_all, &mut writer);
-            info!("capture_environment thread: completed");
-        });
-
-        Some(handle)
+        std::thread::spawn(move || {
+            if let Some(mut writer) = writer {
+                debug!("capture_environment thread: starting");
+                Self::write_environment_comms(&pid_lookup, &mut writer);
+                Self::write_environment_modules(&pid_lookup, captures_all, &mut writer);
+                info!("capture_environment thread: completed");
+            }
+        })
     }
 
     /// Write COMM records for all matching processes into the ring buffer.

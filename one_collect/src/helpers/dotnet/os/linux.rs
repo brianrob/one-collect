@@ -1497,7 +1497,7 @@ mod tests {
         let env_handle = session.spawn_capture_environment();
         session.parse_for_duration(duration).unwrap();
         session.disable().unwrap();
-        if let Some(h) = env_handle { let _ = h.join(); }
+        let _ = env_handle.join();
 
         helper.disable_perf_maps();
         helper.remove_perf_maps();
