@@ -1154,6 +1154,7 @@ impl PerfSession {
                 debug!("capture_environment thread: starting");
                 Self::write_environment_comms(&pid_lookup, &mut writer);
                 Self::write_environment_modules(&pid_lookup, captures_all, &mut writer);
+                writer.flush();
                 info!("capture_environment thread: completed");
             }
         })
