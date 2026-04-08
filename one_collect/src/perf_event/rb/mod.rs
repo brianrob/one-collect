@@ -1001,6 +1001,7 @@ pub struct InProcessRingBufWriter {
     data_size: usize,
     data_mask: usize,
     head: usize,
+    lost_count: u64,
 }
 
 // SAFETY: InProcessRingBufWriter only writes to memory via raw pointer.
@@ -1064,6 +1065,7 @@ impl InProcessRingBuf {
             data_size: self.data_size,
             data_mask: self.data_mask,
             head: self.head,
+            lost_count: 0,
         }
     }
 }
@@ -1071,6 +1073,9 @@ impl InProcessRingBuf {
 impl InProcessRingBufWriter {
     /// Maximum time to spin-wait for space to become available (100 ms).
     const WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+
+    /// Size of a PERF_RECORD_LOST record: 8-byte header + 8-byte id + 8-byte lost count.
+    const LOST_RECORD_SIZE: usize = 24;
 
     /// Read the current tail value written by the reader.
     fn tail(&self) -> usize {
@@ -1104,33 +1109,10 @@ impl InProcessRingBufWriter {
         }
     }
 
-    /// Write a complete perf event record into the ring buffer.
-    /// If not enough space is available after a brief spin-wait, the
-    /// record is dropped and a warning is logged.
-    pub fn write(&mut self, record: &[u8]) {
-        if record.len() > self.data_size {
-            warn!(
-                "InProcessRingBufWriter::write: record_len={} exceeds data_size={}, dropping",
-                record.len(), self.data_size
-            );
-            return;
-        }
-
-        if self.available() < record.len() {
-            warn!(
-                "InProcessRingBufWriter::write: insufficient space for record_len={}, waiting",
-                record.len()
-            );
-
-            if !self.wait_for_space(record.len()) {
-                warn!(
-                    "InProcessRingBufWriter::write: timed out waiting for space, dropping record_len={}",
-                    record.len()
-                );
-                return;
-            }
-        }
-
+    /// Write raw bytes into the ring buffer without any lost-record logic.
+    /// Caller must ensure `record.len() <= self.data_size` and that
+    /// sufficient space is available.
+    fn write_raw(&mut self, record: &[u8]) {
         let write_pos = self.head & self.data_mask;
 
         unsafe {
@@ -1164,9 +1146,93 @@ impl InProcessRingBufWriter {
         }
 
         trace!(
-            "InProcessRingBufWriter::write: record_len={}, head={:#x}",
+            "InProcessRingBufWriter::write_raw: record_len={}, head={:#x}",
             record.len(), self.head
         );
+    }
+
+    /// If there are pending lost events and enough space is available,
+    /// write a PERF_RECORD_LOST record and reset the counter.
+    fn flush_pending_lost(&mut self) {
+        if self.lost_count == 0 {
+            return;
+        }
+
+        if self.available() < Self::LOST_RECORD_SIZE {
+            return;
+        }
+
+        let mut record = Vec::new();
+
+        /* Payload: id (u64) + lost count (u64) */
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u64.to_ne_bytes());
+        payload.extend_from_slice(&self.lost_count.to_ne_bytes());
+
+        abi::Header::write(
+            abi::PERF_RECORD_LOST,
+            0,
+            &payload,
+            &mut record);
+
+        warn!(
+            "InProcessRingBufWriter: writing lost record, lost_count={}",
+            self.lost_count
+        );
+
+        self.lost_count = 0;
+        self.write_raw(&record);
+    }
+
+    /// Flush any pending lost record. Call this at the end of a session
+    /// to ensure lost events are reported even when no more writes follow.
+    pub fn flush(&mut self) {
+        self.flush_pending_lost();
+    }
+
+    /// Write a complete perf event record into the ring buffer.
+    /// If not enough space is available after a brief spin-wait, the
+    /// record is dropped, the lost counter is incremented, and a
+    /// warning is logged.  On a successful write, any accumulated
+    /// lost events are flushed first.
+    pub fn write(&mut self, record: &[u8]) {
+        if record.len() > self.data_size {
+            warn!(
+                "InProcessRingBufWriter::write: record_len={} exceeds data_size={}, dropping",
+                record.len(), self.data_size
+            );
+            self.lost_count += 1;
+            return;
+        }
+
+        /* Account for a pending lost record that may need to be written
+         * alongside the actual record. */
+        let extra = if self.lost_count > 0 {
+            Self::LOST_RECORD_SIZE
+        } else {
+            0
+        };
+
+        let needed = record.len() + extra;
+
+        if self.available() < needed {
+            warn!(
+                "InProcessRingBufWriter::write: insufficient space for record_len={}, waiting",
+                record.len()
+            );
+
+            if !self.wait_for_space(needed) {
+                warn!(
+                    "InProcessRingBufWriter::write: timed out waiting for space, dropping record_len={}",
+                    record.len()
+                );
+                self.lost_count += 1;
+                return;
+            }
+        }
+
+        self.flush_pending_lost();
+        self.write_raw(record);
     }
 }
 
@@ -1445,6 +1511,253 @@ mod tests {
                 expected,
                 u64::from_ne_bytes(read[8..16].try_into().unwrap()));
         }
+
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+    }
+
+    #[test]
+    fn in_process_ring_buf_write_wrap() {
+        let mut temp = Vec::new();
+
+        /* Create an in-process ring buffer with 1 data page */
+        let mut ring_buf = InProcessRingBuf::new(1);
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+
+        /* Each record is 16 bytes (8-byte header + 8-byte payload).
+         * Write 255 records to advance head to 4080 bytes, leaving
+         * 16 bytes before the end of the 4096-byte data region. */
+        let mut record = Vec::new();
+        for i in 0u64..255 {
+            record.clear();
+            abi::Header::write(1024, 0, &i.to_ne_bytes(), &mut record);
+            writer.write(&record);
+        }
+
+        /* Read and discard those records, advancing the tail to 4080
+         * so the writer sees enough free space for the next write. */
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+        while cursor.more() {
+            let _ = reader.read(&mut cursor, &mut temp).unwrap();
+        }
+        reader.end_reading(&cursor);
+
+        /* Write a 24-byte record (8-byte header + 16-byte payload).
+         * With head at 4080 and data_size = 4096:
+         *   write_pos = 4080, write_pos + 24 = 4104 > 4096
+         * so the record must wrap around the end of the buffer. */
+        let payload = [0x55u8; 16]; /* arbitrary fill pattern */
+        record.clear();
+        abi::Header::write(1024, 0, &payload, &mut record);
+        assert_eq!(24, record.len());
+        writer.write(&record);
+
+        /* Read the wrapped record and verify its contents */
+        reader.begin_reading(&mut cursor);
+        assert!(cursor.more());
+
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(24, header.size);
+        assert_eq!(24, read.len());
+        assert_eq!(payload, read[8..24]);
+
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+    }
+
+    #[test]
+    fn in_process_ring_buf_lost_record_on_next_write() {
+        let mut temp = Vec::new();
+
+        /* 1 data page = 4096 bytes */
+        let mut ring_buf = InProcessRingBuf::new(1);
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+
+        /* Fill the buffer completely: 256 × 16-byte records = 4096 bytes.
+         * After this, available() == 0 so the next write will be dropped. */
+        let mut record = Vec::new();
+        for i in 0u64..256 {
+            record.clear();
+            abi::Header::write(1024, 0, &i.to_ne_bytes(), &mut record);
+            writer.write(&record);
+        }
+
+        /* Attempt a write that will fail due to no space - this should
+         * increment lost_count rather than silently dropping. */
+        record.clear();
+        abi::Header::write(1024, 0, &0xDEADu64.to_ne_bytes(), &mut record);
+        writer.write(&record);
+
+        /* Drain all data so the reader advances the tail, freeing space. */
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+        while cursor.more() {
+            let _ = reader.read(&mut cursor, &mut temp).unwrap();
+        }
+        reader.end_reading(&cursor);
+
+        /* Next successful write should first emit a PERF_RECORD_LOST,
+         * then the actual record. */
+        record.clear();
+        abi::Header::write(1024, 0, &42u64.to_ne_bytes(), &mut record);
+        writer.write(&record);
+
+        reader.begin_reading(&mut cursor);
+        assert!(cursor.more());
+
+        /* First record should be PERF_RECORD_LOST */
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(abi::PERF_RECORD_LOST, header.entry_type);
+        assert_eq!(24, header.size);
+        let lost_id = u64::from_ne_bytes(read[8..16].try_into().unwrap());
+        let lost_count = u64::from_ne_bytes(read[16..24].try_into().unwrap());
+        assert_eq!(0, lost_id);
+        assert_eq!(1, lost_count);
+
+        /* Second record should be the actual data */
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(42, u64::from_ne_bytes(read[8..16].try_into().unwrap()));
+
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+    }
+
+    #[test]
+    fn in_process_ring_buf_lost_record_accumulates() {
+        let mut temp = Vec::new();
+
+        let mut ring_buf = InProcessRingBuf::new(1);
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+
+        /* Fill the buffer completely */
+        let mut record = Vec::new();
+        for i in 0u64..256 {
+            record.clear();
+            abi::Header::write(1024, 0, &i.to_ne_bytes(), &mut record);
+            writer.write(&record);
+        }
+
+        /* Attempt 3 writes that will each fail */
+        for _ in 0..3 {
+            record.clear();
+            abi::Header::write(1024, 0, &0u64.to_ne_bytes(), &mut record);
+            writer.write(&record);
+        }
+
+        /* Drain */
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+        while cursor.more() {
+            let _ = reader.read(&mut cursor, &mut temp).unwrap();
+        }
+        reader.end_reading(&cursor);
+
+        /* Next write should emit a single PERF_RECORD_LOST with count=3 */
+        record.clear();
+        abi::Header::write(1024, 0, &99u64.to_ne_bytes(), &mut record);
+        writer.write(&record);
+
+        reader.begin_reading(&mut cursor);
+        assert!(cursor.more());
+
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(abi::PERF_RECORD_LOST, header.entry_type);
+        let lost_count = u64::from_ne_bytes(read[16..24].try_into().unwrap());
+        assert_eq!(3, lost_count);
+
+        /* Followed by the actual data record */
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(99, u64::from_ne_bytes(read[8..16].try_into().unwrap()));
+
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+    }
+
+    #[test]
+    fn in_process_ring_buf_flush_writes_lost_record() {
+        let mut temp = Vec::new();
+
+        let mut ring_buf = InProcessRingBuf::new(1);
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+
+        /* Fill the buffer */
+        let mut record = Vec::new();
+        for i in 0u64..256 {
+            record.clear();
+            abi::Header::write(1024, 0, &i.to_ne_bytes(), &mut record);
+            writer.write(&record);
+        }
+
+        /* Fail 2 writes */
+        for _ in 0..2 {
+            record.clear();
+            abi::Header::write(1024, 0, &0u64.to_ne_bytes(), &mut record);
+            writer.write(&record);
+        }
+
+        /* Drain */
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+        while cursor.more() {
+            let _ = reader.read(&mut cursor, &mut temp).unwrap();
+        }
+        reader.end_reading(&cursor);
+
+        /* flush() at end of session should emit the lost record */
+        writer.flush();
+
+        reader.begin_reading(&mut cursor);
+        assert!(cursor.more());
+
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(abi::PERF_RECORD_LOST, header.entry_type);
+        assert_eq!(24, header.size);
+        let lost_count = u64::from_ne_bytes(read[16..24].try_into().unwrap());
+        assert_eq!(2, lost_count);
+
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+    }
+
+    #[test]
+    fn in_process_ring_buf_no_lost_record_when_zero() {
+        let mut temp = Vec::new();
+
+        let mut ring_buf = InProcessRingBuf::new(1);
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+
+        /* Write a normal record */
+        let mut record = Vec::new();
+        abi::Header::write(1024, 0, &1u64.to_ne_bytes(), &mut record);
+        writer.write(&record);
+
+        /* flush() with no lost records should be a no-op */
+        writer.flush();
+
+        let mut cursor = CpuRingCursor::default();
+        reader.begin_reading(&mut cursor);
+        assert!(cursor.more());
+
+        /* Only the normal record, no lost record */
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(1024, header.entry_type);
+        assert_eq!(1, u64::from_ne_bytes(read[8..16].try_into().unwrap()));
 
         assert!(!cursor.more());
         reader.end_reading(&cursor);

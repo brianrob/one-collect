@@ -178,7 +178,7 @@ fn main() {
     session.parse_for_duration(duration).expect(need_permission);
     session.disable().expect(need_permission);
 
-    if let Some(h) = env_handle { let _ = h.join(); }
+    let _ = env_handle.join();
 
     /* Close up log */
     final_output.write(|output| {
