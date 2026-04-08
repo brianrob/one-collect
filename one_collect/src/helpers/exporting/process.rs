@@ -4,6 +4,8 @@
 use std::fs::File;
 use std::cell::OnceCell;
 
+use tracing::debug;
+
 use crate::intern::InternedCallstacks;
 
 use ruwind::{CodeSection, Unwindable};
@@ -852,6 +854,7 @@ impl ExportProcess {
         addrs.clear();
         frames.clear();
 
+        let pid = self.pid();
         for map in self.mappings.mappings_mut() {
             if !map.anon() {
                 continue;
@@ -865,6 +868,8 @@ impl ExportProcess {
                 Some(map));
 
             if addrs.is_empty() {
+                debug!("add_matching_anon_symbols: no unique IPs in anonymous mapping: pid={}, mapping_start={:#x}",
+                    pid, map.start());
                 continue;
             }
 
