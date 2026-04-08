@@ -4,16 +4,19 @@
 use std::fs::File;
 use std::ffi::CString;
 use std::path::Path;
+use std::sync::Arc;
 use tracing::debug;
 
 #[cfg(target_os = "linux")]
 use std::os::unix::ffi::OsStrExt;
 #[cfg(target_os = "linux")]
-use std::os::fd::{RawFd, FromRawFd, IntoRawFd};
+use std::os::fd::{RawFd, FromRawFd, IntoRawFd, OwnedFd, AsRawFd};
 
 /* Required for cross-platform docs */
 #[cfg(not(target_os = "linux"))]
 struct RawFd {}
+#[cfg(not(target_os = "linux"))]
+struct OwnedFd {}
 
 /// `DupFd` is a wrapper around a raw file descriptor.
 ///
@@ -59,9 +62,11 @@ impl DupFd {
 
 /// `OpenAt` provides a safe interface for opening and manipulating files relative to a directory file descriptor.
 ///
+/// Uses `Arc<OwnedFd>` for the underlying fd so that clones share ownership
+/// and the fd is only closed when the last clone is dropped.
 #[derive(Clone)]
 pub struct OpenAt {
-    fd: RawFd,
+    fd: Arc<OwnedFd>,
 }
 
 impl OpenAt {
@@ -74,7 +79,7 @@ impl OpenAt {
     /// * `Self`: A new `OpenAt` instance.
     pub fn new(dir: File) -> Self {
         Self {
-            fd: dir.into_raw_fd()
+            fd: Arc::new(OwnedFd::from(dir))
         }
     }
 
@@ -97,7 +102,7 @@ impl OpenAt {
 
         unsafe {
             let fd = libc::openat(
-                self.fd,
+                self.fd.as_raw_fd(),
                 path_bytes.as_ptr() as *const libc::c_char,
                 libc::O_RDONLY | libc::O_CLOEXEC);
 
@@ -130,7 +135,7 @@ impl OpenAt {
 
         unsafe {
             let result = libc::unlinkat(
-                self.fd,
+                self.fd.as_raw_fd(),
                 path.as_ptr() as *const libc::c_char,
                 0);
 
@@ -209,14 +214,5 @@ impl OpenAt {
 
         debug!("Found matching paths: path={:?}, count={}, prefix={}", path, paths.len(), prefix);
         Some(paths)
-    }
-}
-
-impl Drop for OpenAt {
-    /// Closes the directory file descriptor when the `OpenAt` struct is dropped.
-    fn drop(&mut self) {
-        unsafe {
-            libc::close(self.fd);
-        }
     }
 }

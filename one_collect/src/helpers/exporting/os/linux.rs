@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::fmt::Write;
 use std::io::BufReader;
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::{ReadOnly, Writable};
 use crate::event::DataFieldRef;
@@ -118,6 +118,7 @@ impl ExportProcessLinuxExt for ExportProcess {
         frames.clear();
 
         if self.os.root_fs.is_none() {
+            warn!("add_matching_elf_symbols: skipped, pid={}, no root_fs available", self.pid());
             return;
         }
 
@@ -157,7 +158,10 @@ impl ExportProcessLinuxExt for ExportProcess {
             // Get the dev node or continue.
             let dev_node = match map.node() {
                 Some(key) => key,
-                None => continue
+                None => {
+                    debug!("add_matching_elf_symbols: no dev_node for file={}, skipping", filename);
+                    continue
+                }
             };
 
             // If there is no metadata, then we can't load symbols.
@@ -171,6 +175,10 @@ impl ExportProcessLinuxExt for ExportProcess {
                     metadata,
                     SYMBOL_TYPE_ELF_SYMTAB | SYMBOL_TYPE_ELF_DYNSYM,
                     strings);
+
+                if sym_files.is_empty() {
+                    debug!("add_matching_elf_symbols: no symbol files found for file={}", filename);
+                }
 
                 for sym_file in sym_files {
 
@@ -1199,13 +1207,16 @@ impl OSExportMachine {
             let file = proc.open_file(&path_buf);
             path_buf.pop();
 
-            if file.is_err() {
-                info!("Perf-map file rejected: could not open file");
-                continue;
-            }
+            let file = match file {
+                Ok(f) => f,
+                Err(e) => {
+                    warn!("Unable to open perf-map file: pid={}, ns_pid={:?}, error={}", proc.pid(), ns_pid, e);
+                    continue;
+                }
+            };
 
             info!("Perf-map file accepted: file opened successfully");
-            let mut sym_reader = PerfMapSymbolReader::new(file.unwrap());
+            let mut sym_reader = PerfMapSymbolReader::new(file);
 
             proc.add_matching_anon_symbols(
                 &mut addrs,

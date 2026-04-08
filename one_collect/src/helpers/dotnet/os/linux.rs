@@ -145,17 +145,22 @@ impl PerfMapContext {
                     warn!("Failed to write to diagnostic socket: pid={}, nspid={}, error={}", self.pid, self.nspid, e);
                     anyhow::bail!("Failed to write to diagnostic socket: {}", e);
                 }
-                sock.read_exact(&mut result)?;
+                if let Err(e) = sock.read_exact(&mut result) {
+                    warn!("Failed to read diagnostic socket response: pid={}, nspid={}, error={}", self.pid, self.nspid, e);
+                    anyhow::bail!("Failed to read diagnostic socket response: {}", e);
+                }
 
                 let result = u32::from_le_bytes(result[20..].try_into()?);
 
                 if result != 0 {
-                    anyhow::bail!("Failed with error {}.", result);
+                    warn!("Diagnostic socket returned error: pid={}, nspid={}, result={}", self.pid, self.nspid, result);
+                    anyhow::bail!("Diagnostic socket returned error: {}", result);
                 }
 
+                info!("Perf map enabled: pid={}, nspid={}", self.pid, self.nspid);
                 Ok(())
             },
-            None => { anyhow::bail!("Not found."); },
+            None => { anyhow::bail!("Diagnostic socket not found: pid={}, nspid={}", self.pid, self.nspid); },
         }
     }
 
@@ -476,23 +481,39 @@ impl PerfMapTracker {
 
             let nspid = procfs::ns_pid(&mut path_buf, pid).unwrap_or(pid);
 
-            if let Ok(proc) = PerfMapContext::new(pid, nspid) {
-                if let Ok(has_environ) = proc.has_perf_map_environ() {
-                    if has_environ {
-                        continue;
-                    }
+            let proc = match PerfMapContext::new(pid, nspid) {
+                Ok(proc) => proc,
+                Err(e) => {
+                    warn!("PerfMapTracker: failed to create PerfMapContext: pid={}, nspid={}, error={}", pid, nspid, e);
+                    continue;
+                }
+            };
 
-                    /* Always try to disable in case it was left on */
-                    let _ = proc.disable_perf_map();
+            match proc.has_perf_map_environ() {
+                Ok(true) => {
+                    debug!("PerfMapTracker: skipping pid={}, nspid={}, already has perf map env var", pid, nspid);
+                    continue;
+                }
+                Ok(false) => { }
+                Err(e) => {
+                    warn!("PerfMapTracker: failed to read perf map environ: pid={}, nspid={}, error={}", pid, nspid, e);
+                }
+            }
 
-                    /* Enable until the thread is done */
-                    if proc.enable_perf_map().is_ok() {
-                        /* Save context for later */
-                        arc.lock().unwrap().push(proc);
+            /* Always try to disable in case it was left on */
+            let _ = proc.disable_perf_map();
 
-                        /* Ensure we don't enable it again */
-                        pids.insert(pid);
-                    }
+            /* Enable until the thread is done */
+            match proc.enable_perf_map() {
+                Ok(()) => {
+                    /* Save context for later */
+                    arc.lock().unwrap().push(proc);
+
+                    /* Ensure we don't enable it again */
+                    pids.insert(pid);
+                }
+                Err(e) => {
+                    warn!("PerfMapTracker: failed to enable perf map: pid={}, nspid={}, error={}", pid, nspid, e);
                 }
             }
         }
