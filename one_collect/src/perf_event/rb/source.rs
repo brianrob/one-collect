@@ -441,6 +441,7 @@ pub struct RingBufDataSource {
     hard_page_faults_builder: Option<RingBufBuilder<PageFaults>>,
     next_time: Option<u64>,
     oldest_cpu: Option<usize>,
+    in_process_ring_buf: Option<InProcessRingBuf>,
 }
 
 impl RingBufDataSource {
@@ -474,6 +475,7 @@ impl RingBufDataSource {
             next_time: None,
             oldest_cpu: None,
             enabled: false,
+            in_process_ring_buf: None,
         }
     }
 
@@ -734,6 +736,23 @@ impl RingBufDataSource {
             }
         }
 
+        /* Create in-process ring buffer for capture_environment.
+         * The reader is added to the normal readers/cursors so that
+         * in-process events are processed in time order alongside
+         * kernel events. */
+        let mut in_process = InProcessRingBuf::new(self.pages);
+        let reader = in_process.create_reader();
+
+        self.readers.push(reader);
+        self.cursors.push(CpuRingCursor::default());
+        self.in_process_ring_buf = Some(in_process);
+
+        /* Insert a dummy CpuRingBuf at id=0 so that read_time() can
+         * look up the attributes for in-process records (which use
+         * identifier 0). */
+        let common_attrs = Rc::new(RingBufBuilder::common_attributes());
+        self.ring_bufs.insert(0, CpuRingBuf::new(0, common_attrs));
+
         info!(
             "RingBufDataSource built successfully: ring_buf_count={}, reader_count={}",
             self.ring_bufs.len(), self.readers.len()
@@ -746,6 +765,9 @@ impl RingBufDataSource {
         debug!("RingBufDataSource::enable: enabling {} ring buffers", self.ring_bufs.len());
 
         for rb in self.ring_bufs.values() {
+            if !rb.is_open() {
+                continue;
+            }
             rb.enable()?;
         }
 
@@ -760,6 +782,9 @@ impl RingBufDataSource {
         debug!("RingBufDataSource::disable: disabling {} ring buffers", self.ring_bufs.len());
 
         for rb in self.ring_bufs.values() {
+            if !rb.is_open() {
+                continue;
+            }
             rb.disable()?;
         }
 
@@ -1096,6 +1121,11 @@ impl PerfDataSource for RingBufDataSource {
         }
 
         self.enabled
+    }
+
+    fn take_in_process_writer(
+        &mut self) -> Option<InProcessRingBufWriter> {
+        self.in_process_ring_buf.as_mut().map(|rb| rb.writer())
     }
 }
 

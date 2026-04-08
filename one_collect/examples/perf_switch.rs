@@ -166,16 +166,19 @@ fn main() {
         Ok(())
     });
 
-    /* Need to capture existing process names, etc */
-    session.capture_environment();
-
     /* Run */
     println!("Capturing to output.json...");
 
     session.set_read_timeout(std::time::Duration::from_millis(8));
     session.enable().expect(need_permission);
+
+    /* Need to capture existing process names, etc */
+    let env_handle = session.spawn_capture_environment();
+
     session.parse_for_duration(duration).expect(need_permission);
     session.disable().expect(need_permission);
+
+    if let Some(h) = env_handle { let _ = h.join(); }
 
     /* Close up log */
     final_output.write(|output| {
