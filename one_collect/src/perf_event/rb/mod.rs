@@ -1482,7 +1482,7 @@ mod tests {
          * With head at 4080 and data_size = 4096:
          *   write_pos = 4080, write_pos + 24 = 4104 > 4096
          * so the record must wrap around the end of the buffer. */
-        let payload = [0x55u8; 16];
+        let payload = [0x55u8; 16]; /* arbitrary fill pattern */
         record.clear();
         abi::Header::write(1024, 0, &payload, &mut record);
         assert_eq!(24, record.len());
