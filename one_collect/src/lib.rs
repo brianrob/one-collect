@@ -30,6 +30,10 @@ impl Guid {
             data4: (uuid as u64).to_be_bytes()
         }
     }
+
+    pub fn to_bytes(&self) -> [u8; 16] {
+        unsafe { std::mem::transmute(*self) }
+    }
 }
 
 pub mod event;
