@@ -164,13 +164,16 @@ impl ExportSamplerOSHooks for ExportSampler {
     fn os_event_activity_id(
         &self,
         _data: &EventData) -> anyhow::Result<Option<[u8; 16]>> {
-        Ok(None)
+        Ok(Some(self.os.ancillary.borrow().activity().to_bytes()))
     }
 
     fn os_event_related_activity_id(
         &self,
         _data: &EventData) -> anyhow::Result<Option<[u8; 16]>> {
-        Ok(None)
+        Ok(match self.os.ancillary.borrow().related_activity() {
+            Some(id) => { Some(id.to_bytes()) },
+            None => { None },
+        })
     }
 
     fn os_event_callstack(

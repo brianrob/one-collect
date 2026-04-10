@@ -109,6 +109,19 @@ impl AncillaryData {
         }
     }
 
+    pub fn related_activity(&self) -> Option<Guid> {
+        if let Some(ext) = self.find_ext(
+            abi::EVENT_HEADER_EXT_TYPE_RELATED_ACTIVITYID) {
+            unsafe {
+                if (*ext).DataSize == 16 {
+                    return Some(*((*ext).DataPtr as *const Guid));
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn op_code(&self) -> u8 {
         match self.event {
             Some(event) => {
