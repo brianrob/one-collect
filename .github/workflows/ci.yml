@@ -12,6 +12,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Clippy lints ordered by platform (glibc, musl, windows)
+  clippy_linux_glibc_x64:
+    uses: ./.github/workflows/clippy.yml
+    with:
+      os: ubuntu-latest
+      platform-name: Linux-glibc-x64
+
+  clippy_linux_musl_x64:
+    uses: ./.github/workflows/clippy.yml
+    with:
+      os: ubuntu-latest
+      container: rust:alpine
+      setup-command: apk add --no-cache musl-dev
+      platform-name: Linux-musl-x64
+
+  clippy_windows_x64:
+    uses: ./.github/workflows/clippy.yml
+    with:
+      os: windows-latest
+      platform-name: Windows-x64
+
   # Linux builds ordered by platform (glibc, musl) then flavor (debug, release)
   build_linux_glibc_x64_debug:
     uses: ./.github/workflows/build-and-test.yml
