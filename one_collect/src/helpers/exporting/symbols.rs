@@ -423,7 +423,7 @@ impl PerfMapSymbolReader {
     }
 
     fn load_next(&mut self) {
-        loop {
+        'load: {
             self.buffer.clear();
 
             self.start_ip = 0;
@@ -433,11 +433,11 @@ impl PerfMapSymbolReader {
             if let Ok(len) = self.reader.read_line(&mut self.buffer) {
                 if len == 0 {
                     trace!("PerfMap load_next: end of file");
-                    break;
+                    break 'load;
                 }
             } else {
                 trace!("PerfMap load_next: read error");
-                break;
+                break 'load;
             }
 
             trace!("PerfMap load_next: parsing line={}", self.buffer.trim());
@@ -595,7 +595,7 @@ impl R2RMapSymbolReader {
     }
 
     fn load_next(&mut self) {
-        loop {
+        'load: {
             self.buffer.clear();
 
             self.start_ip = 0;
@@ -604,10 +604,10 @@ impl R2RMapSymbolReader {
 
             if let Ok(len) = self.reader.read_line(&mut self.buffer) {
                 if len == 0 {
-                    break;
+                    break 'load;
                 }
             } else {
-                break;
+                break 'load;
             }
 
             for (index, part) in self.buffer.splitn(3, ' ').enumerate() {

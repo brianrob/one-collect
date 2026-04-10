@@ -648,7 +648,7 @@ pub fn read_build_id<'a>(
             if name == ".note.gnu.build-id" {
                 debug!("Found build-id section: offset={:#x}, size={}", section.offset, section.size);
                 let _len = seek_to_note_data(reader, section)?;
-                reader.read(&mut buf[0..])?;
+                reader.read_exact(&mut buf[0..])?;
                 info!("Build-id retrieved successfully");
                 return Ok(Some(buf));
             }
@@ -704,7 +704,7 @@ pub fn read_debug_link<'a>(
             if name == ".gnu_debuglink" {
                 debug!("Found debug link section: offset={:#x}, size={}", section.offset, section.size);
                 reader.seek(SeekFrom::Start(section.offset))?;
-                reader.read(&mut buf[0..section.size as usize])?;
+                reader.read_exact(&mut buf[0..section.size as usize])?;
                 info!("Debug link retrieved successfully");
                 return Ok(Some(buf));
             }
