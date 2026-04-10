@@ -1181,7 +1181,7 @@ impl NetTraceWriter {
     fn init(&mut self) -> anyhow::Result<()> {
         self.init_threads();
 
-        self.output.write(b"Nettrace")?;
+        self.output.write_all(b"Nettrace")?;
         self.output.write_u32(0)?; /* Reserved */
         self.output.write_u32(6)?; /* Major Ver */
         self.output.write_u32(0) /* Minor Ver */

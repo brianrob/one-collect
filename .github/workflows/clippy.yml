@@ -1,4 +1,4 @@
-name: Benchmarks
+name: Clippy
 
 permissions:
   contents: read
@@ -23,9 +23,12 @@ on:
         type: string
         description: 'Platform name for display (e.g., Linux-glibc-x64, Windows-x64)'
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  benchmarks:
-    name: Run Benchmarks (${{ inputs.platform-name }})
+  clippy:
+    name: Clippy (${{ inputs.platform-name }})
     runs-on: ${{ inputs.os }}
     container: ${{ inputs.container || null }}
 
@@ -33,9 +36,24 @@ jobs:
     - name: Setup environment
       if: ${{ inputs.setup-command != '' }}
       run: ${{ inputs.setup-command }}
-    
+
     - uses: actions/checkout@v3
-    
-    - name: Run benchmarks
+
+    - name: Install clippy
+      run: rustup component add clippy
+
+    - name: 'one_collect: Clippy'
       working-directory: one_collect
-      run: cargo bench --locked --verbose
+      run: cargo clippy --locked
+
+    - name: 'ruwind: Clippy'
+      working-directory: ruwind
+      run: cargo clippy --locked
+
+    - name: 'record-trace executable: Clippy'
+      working-directory: record-trace
+      run: cargo clippy --locked
+
+    - name: 'record-trace FFI: Clippy'
+      working-directory: record-trace/ffi
+      run: cargo clippy --locked
