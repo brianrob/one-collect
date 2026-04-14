@@ -966,6 +966,9 @@ impl PerfDataSource for RingBufDataSource {
                 false => { &self.target_cpus },
             };
 
+            /* Snapshot existing ring buf keys so we can find newly created ones */
+            let before: std::collections::HashSet<u64> = self.ring_bufs.keys().copied().collect();
+
             match &self.target_pids {
                 None => {
                     Self::add_cpu_bufs(
@@ -987,6 +990,31 @@ impl PerfDataSource for RingBufDataSource {
                             None)?;
                     }
                 },
+            }
+
+            /* Apply perf tracepoint filter to newly created fds if set */
+            if let Some(filter_str) = event.extension().perf_filter() {
+                let filter_cstr = std::ffi::CString::new(filter_str)
+                    .map_err(|_| io_error("Invalid perf filter string"))?;
+
+                for (&id, buf) in self.ring_bufs.iter() {
+                    if !before.contains(&id) {
+                        if let Err(err) = buf.set_filter(&filter_cstr) {
+                            warn!(
+                                "add_event: failed to set perf filter on cpu={}, event={}: {}",
+                                buf.cpu,
+                                event.name(),
+                                err
+                            );
+                        }
+                    }
+                }
+
+                debug!(
+                    "add_event: perf filter applied, event_name={}, filter={:?}",
+                    event.name(),
+                    filter_str
+                );
             }
 
             info!("Event added: event_name={}, event_id={}", event.name(), event.id());
