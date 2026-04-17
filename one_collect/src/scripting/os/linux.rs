@@ -336,6 +336,10 @@ impl OSScriptEngine {
             }
         });
 
+        engine.register_fn(
+            "set_perf_filter",
+            ScriptEvent::set_perf_filter);
+
         info!("OSScriptEngine::enable: Linux script functions registered successfully");
     }
 
