@@ -962,6 +962,36 @@ impl CpuRingBuf {
             Ok(())
         }
     }
+
+    pub fn set_filter(&self, filter: &std::ffi::CStr) -> IOResult<()> {
+        if self.fd.is_none() {
+            warn!("set_filter failed: ring buffer not open, cpu={}", self.cpu);
+            return Err(io_error("Ring buffer is not open."));
+        }
+
+        unsafe {
+            let result = ioctl(
+                self.fd.unwrap(),
+                abi::PERF_EVENT_IOC_SET_FILTER as _,
+                filter.as_ptr(),
+            );
+
+            if result == -1 {
+                let err = IOError::last_os_error();
+                warn!(
+                    "set_filter ioctl failed: cpu={}, fd={}, error={}",
+                    self.cpu,
+                    self.fd.unwrap(),
+                    err
+                );
+                return Err(err);
+            }
+        };
+
+        debug!("CpuRingBuf filter set: cpu={}, id={:?}", self.cpu, self.id);
+
+        Ok(())
+    }
 }
 
 impl Drop for CpuRingBuf {

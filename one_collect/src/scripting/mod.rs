@@ -28,6 +28,15 @@ impl ScriptEvent {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn set_perf_filter(
+        &mut self,
+        filter: String) {
+        if let Some(event) = self.event.borrow_mut().as_mut() {
+            event.extension_mut().set_perf_filter(filter);
+        }
+    }
+
     pub fn append_field(
         &mut self,
         name: String,
