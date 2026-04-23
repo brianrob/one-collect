@@ -132,9 +132,11 @@ pub struct Module {
     start: u64,
     end: u64,
     offset: u64,
+    va_offset: u64,
     key: ModuleKey,
     anon: bool,
     unwind_type: UnwindType,
+    va_offset: u64,
 }
 
 #[derive(Default)]
