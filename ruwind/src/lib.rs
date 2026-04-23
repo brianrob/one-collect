@@ -46,9 +46,42 @@ impl Hash for ModuleKey {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnwindError {
+    AnonPrologNotFound,
+    RegisterOutOfRange,
+    NoReturnAddressRegister,
+    CfaWouldGoBackwards,
+    BadStackRbpRead,
+    BadStackIpRead,
+    NoModuleFound,
+    ProcessNotMapped,
+}
+
+impl UnwindError {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UnwindError::AnonPrologNotFound => "Anon prolog not found",
+            UnwindError::RegisterOutOfRange => "Register out of range",
+            UnwindError::NoReturnAddressRegister => "No return address register",
+            UnwindError::CfaWouldGoBackwards => "CFA would go backwards",
+            UnwindError::BadStackRbpRead => "Bad stack RBP read",
+            UnwindError::BadStackIpRead => "Bad stack IP read",
+            UnwindError::NoModuleFound => "No module found",
+            UnwindError::ProcessNotMapped => "Process not mapped",
+        }
+    }
+}
+
+impl std::fmt::Display for UnwindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 pub struct UnwindResult {
     pub frames_pushed: usize,
-    pub error: Option<&'static str>,
+    pub error: Option<UnwindError>,
 }
 
 impl UnwindResult {
