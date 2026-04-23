@@ -57,6 +57,21 @@ impl FrameOffsets {
 
             /* Ensure valid */
             if offset.is_valid() {
+                /*
+                 * The .eh_frame_hdr index only stores the FDE start RVAs;
+                 * partition_point above can return an FDE whose PC range
+                 * ends before the queried RVA (which then sits in a code
+                 * gap with no FDE coverage — common for hand-written
+                 * assembly thunks and JIT helpers in libcoreclr.so).
+                 * Apply the FDE only when the RVA is actually inside its
+                 * declared PC range so we don't compute a garbage CFA.
+                 */
+                if offset.pc_size != 0 && rva >= offset.rva + offset.pc_size {
+                    trace!(
+                        "FDE found but rva {:#x} is outside FDE range {:#x}..{:#x}",
+                        rva, offset.rva, offset.rva + offset.pc_size);
+                    return None;
+                }
                 trace!("Frame offset found and valid: rva={:#x}", rva);
                 return Some(offset);
             } else {
