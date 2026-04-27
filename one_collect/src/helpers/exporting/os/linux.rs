@@ -1265,7 +1265,7 @@ impl OSExportMachine {
             for map in proc.mappings() {
                 if let Some(key) = map.node() {
 
-                    // Handle each binary exactly once, regardless of of it's loaded into multiple processes.
+                    // Handle each binary exactly once, regardless of whether it's loaded into multiple processes.
                     if machine.module_metadata.contains(key) {
                         continue;
                     }

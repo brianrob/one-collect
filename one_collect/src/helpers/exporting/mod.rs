@@ -1830,7 +1830,7 @@ impl ExportMachine {
          * NOTE:
          * On Linux, processes in containers outside of the current
          * container get a PID of 0. This causes the kernel process to
-         * have it's comm name changed incorrectly.
+         * have its comm name changed incorrectly.
          */
         if pid == 0 {
             return Ok(());
@@ -2009,7 +2009,7 @@ impl ExportMachine {
             for map in proc.mappings() {
                 if let Some(key) = map.node() {
 
-                    // Handle each binary exactly once, regardless of of it's loaded into multiple processes.
+                    // Handle each binary exactly once, regardless of whether it's loaded into multiple processes.
                     if self.module_metadata.contains(key) {
                         continue;
                     }
