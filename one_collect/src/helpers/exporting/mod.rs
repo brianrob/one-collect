@@ -1170,6 +1170,16 @@ impl ExportSettings {
         clone
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn with_callstack_stack_size(
+        mut self,
+        bytes: u32) -> Self {
+        if let Some(mut helper) = self.callstack_helper.take() {
+            self.callstack_helper = Some(helper.with_stack_size(bytes));
+        }
+        self
+    }
+
     pub fn with_cswitches(self) -> Self {
         let mut clone = self;
         clone.cswitches = true;
