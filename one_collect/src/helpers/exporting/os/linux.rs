@@ -706,6 +706,12 @@ impl ExportSamplerOSHooks for ExportSampler {
         Ok(None)
     }
 
+    fn os_event_id(
+        &self,
+        _data: &EventData) -> anyhow::Result<Option<usize>> {
+        Ok(None)
+    }
+
     fn os_event_op_code(
         &self,
         _data: &EventData) -> anyhow::Result<Option<u16>> {

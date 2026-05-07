@@ -140,6 +140,7 @@ struct ExportSampler {
     os: OSExportSampler,
     disable_callstacks: bool,
     version_override: Option<u16>,
+    id_override: Option<usize>,
     op_code_override: Option<u16>,
     span_id_override: Option<[u8; 8]>,
     trace_id_override: Option<[u8; 16]>,
@@ -171,6 +172,10 @@ pub trait ExportSamplerOSHooks {
     fn os_event_version(
         &self,
         data: &EventData) -> anyhow::Result<Option<u16>>;
+
+    fn os_event_id(
+        &self,
+        data: &EventData) -> anyhow::Result<Option<usize>>;
 
     fn os_event_op_code(
         &self,
@@ -205,6 +210,7 @@ impl ExportSampler {
             os,
             frames: Vec::new(),
             version_override: None,
+            id_override: None,
             op_code_override: None,
             span_id_override: None,
             trace_id_override: None,
@@ -218,6 +224,13 @@ impl ExportSampler {
         &mut self,
         version: Option<u16>) {
         self.version_override = version;
+    }
+
+    #[allow(dead_code)]
+    fn override_id(
+        &mut self,
+        id: Option<usize>) {
+        self.id_override = id;
     }
 
     fn override_op_code(
@@ -256,6 +269,15 @@ impl ExportSampler {
         match self.version_override {
             Some(version) => Ok(Some(version)),
             None => self.os_event_version(data),
+        }
+    }
+
+    fn id(
+        &self,
+        data: &EventData) -> anyhow::Result<Option<usize>> {
+        match self.id_override {
+            Some(id) => Ok(Some(id)),
+            None => self.os_event_id(data),
         }
     }
 
@@ -675,6 +697,10 @@ impl<'a> ExportTraceContext<'a> {
 
     pub fn tid(&self) -> anyhow::Result<u32> {
         self.sampler.borrow().os_event_tid(self.data)
+    }
+
+    pub fn id(&self) -> anyhow::Result<Option<usize>> {
+        self.sampler.borrow().id(self.data)
     }
 
     pub fn op_code(&self) -> anyhow::Result<Option<u16>> {
