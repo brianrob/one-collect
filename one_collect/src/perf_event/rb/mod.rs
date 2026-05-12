@@ -36,6 +36,12 @@ unsafe fn mb() {
     asm!("dsb sy");
 }
 
+const RING_RECORD_ALIGNMENT: usize = 8;
+
+fn align_ring_record_size(size: usize) -> usize {
+    (size + (RING_RECORD_ALIGNMENT - 1)) & !(RING_RECORD_ALIGNMENT - 1)
+}
+
 pub trait RingBufOptions {
     fn clone_options(&self) -> Self;
 
@@ -522,8 +528,8 @@ impl CpuRingCursor {
 
     pub fn advance(
         &mut self,
-        len: u16) {
-        self.start += len as u64;
+        len: u64) {
+        self.start += len;
     }
 
     pub fn more(&self) -> bool {
@@ -665,7 +671,7 @@ impl<'a> CpuRingReader {
         let data_size = header.size as usize;
         let data_end = header_start + data_size;
 
-        cursor.advance(header.size);
+        cursor.advance(align_ring_record_size(header.size as usize) as u64);
 
         if header_start + data_size <= self.data_size as usize {
             /* Fits within slice, no copy */
@@ -1140,9 +1146,10 @@ impl InProcessRingBufWriter {
     }
 
     /// Write raw bytes into the ring buffer without any lost-record logic.
-    /// Caller must ensure `record.len() <= self.data_size` and that
+    /// Caller must ensure aligned record size is <= `self.data_size` and that
     /// sufficient space is available.
     fn write_raw(&mut self, record: &[u8]) {
+        let aligned_len = align_ring_record_size(record.len());
         let write_pos = self.head & self.data_mask;
 
         unsafe {
@@ -1167,7 +1174,20 @@ impl InProcessRingBufWriter {
                     record.len() - first_part);
             }
 
-            self.head += record.len();
+            let padding = aligned_len - record.len();
+            if padding > 0 {
+                let padding_start = (write_pos + record.len()) & self.data_mask;
+
+                if padding_start + padding <= self.data_size {
+                    std::ptr::write_bytes(dest.add(padding_start), 0, padding);
+                } else {
+                    let first_part = self.data_size - padding_start;
+                    std::ptr::write_bytes(dest.add(padding_start), 0, first_part);
+                    std::ptr::write_bytes(dest, 0, padding - first_part);
+                }
+            }
+
+            self.head += aligned_len;
 
             /* Memory barrier then update head so the reader sees the data */
             mb();
@@ -1226,10 +1246,12 @@ impl InProcessRingBufWriter {
     /// warning is logged.  On a successful write, any accumulated
     /// lost events are flushed first.
     pub fn write(&mut self, record: &[u8]) {
-        if record.len() > self.data_size {
+        let aligned_len = align_ring_record_size(record.len());
+
+        if aligned_len > self.data_size {
             warn!(
-                "InProcessRingBufWriter::write: record_len={} exceeds data_size={}, dropping",
-                record.len(), self.data_size
+                "InProcessRingBufWriter::write: aligned_record_len={} exceeds data_size={}, dropping",
+                aligned_len, self.data_size
             );
             self.lost_count += 1;
             return;
@@ -1243,7 +1265,7 @@ impl InProcessRingBufWriter {
             0
         };
 
-        let needed = record.len() + extra;
+        let needed = aligned_len + extra;
 
         if self.available() < needed {
             warn!(
@@ -1595,6 +1617,42 @@ mod tests {
         assert_eq!(24, read.len());
         assert_eq!(payload, read[8..24]);
 
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+    }
+
+    #[test]
+    fn in_process_ring_buf_write_unaligned_record_aligns_head() {
+        let mut temp = Vec::new();
+        let mut ring_buf = InProcessRingBuf::new(1);
+        let mut writer = ring_buf.writer();
+        let mut reader = ring_buf.create_reader();
+        let mut cursor = CpuRingCursor::default();
+
+        let mut record = Vec::new();
+        let payload = [0xABu8; 5];
+        abi::Header::write(1024, 0, &payload, &mut record);
+        assert_eq!(13, record.len());
+        writer.write(&record);
+
+        reader.begin_reading(&mut cursor);
+        assert_eq!(16, cursor.end);
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(13, header.size);
+        assert_eq!(payload, read[8..13]);
+        assert!(!cursor.more());
+        reader.end_reading(&cursor);
+
+        record.clear();
+        abi::Header::write(1024, 0, &42u64.to_ne_bytes(), &mut record);
+        writer.write(&record);
+
+        reader.begin_reading(&mut cursor);
+        let read = reader.read(&mut cursor, &mut temp).unwrap();
+        let header = abi::Header::from_slice(read).unwrap();
+        assert_eq!(16, header.size);
+        assert_eq!(42, u64::from_ne_bytes(read[8..16].try_into().unwrap()));
         assert!(!cursor.more());
         reader.end_reading(&cursor);
     }
