@@ -520,10 +520,10 @@ impl CpuRingCursor {
         self.end = end;
     }
 
-    fn advance(
+    pub fn advance(
         &mut self,
-        len: u64) {
-        self.start += len;
+        len: u16) {
+        self.start += len as u64;
     }
 
     pub fn more(&self) -> bool {
@@ -665,7 +665,7 @@ impl<'a> CpuRingReader {
         let data_size = header.size as usize;
         let data_end = header_start + data_size;
 
-        cursor.advance(header.size as u64);
+        cursor.advance(header.size);
 
         if header_start + data_size <= self.data_size as usize {
             /* Fits within slice, no copy */
