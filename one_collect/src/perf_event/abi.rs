@@ -314,12 +314,18 @@ impl<'a> Header<'a> {
         misc: u16,
         data: &[u8],
         output: &mut Vec<u8>) {
-        /* Account for header itself */
-        let size = (data.len() + 8) as u16;
+        /* Account for header itself, then align records to 8-byte boundaries. */
+        let unaligned_size = data.len() + 8;
+        let size = ((unaligned_size + 7) & !7) as u16;
         output.extend_from_slice(&entry_type.to_ne_bytes());
         output.extend_from_slice(&misc.to_ne_bytes());
         output.extend_from_slice(&size.to_ne_bytes());
         output.extend_from_slice(data);
+
+        let padding = (size as usize) - unaligned_size;
+        if padding > 0 {
+            output.resize(output.len() + padding, 0);
+        }
     }
 }
 
@@ -361,10 +367,12 @@ mod tests {
 
         assert_eq!(1024, header.entry_type);
         assert_eq!(0, header.misc);
-        assert_eq!(12, header.size);
+        assert_eq!(16, header.size);
 
         let data_slice = header.data;
         let magic_slice = data_slice[0..4].try_into().unwrap();
         assert_eq!(1234, u32::from_ne_bytes(magic_slice));
+
+        assert_eq!([0u8; 4], data_slice[4..8]);
     }
 }

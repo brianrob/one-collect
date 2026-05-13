@@ -671,7 +671,7 @@ impl<'a> CpuRingReader {
         let data_size = header.size as usize;
         let data_end = header_start + data_size;
 
-        cursor.advance(align_ring_record_size(header.size as usize) as u64);
+        cursor.advance(header.size as u64);
 
         if header_start + data_size <= self.data_size as usize {
             /* Fits within slice, no copy */
@@ -1631,15 +1631,16 @@ mod tests {
         let mut record = Vec::new();
         let payload = [0xABu8; 5];
         abi::Header::write(1024, 0, &payload, &mut record);
-        assert_eq!(13, record.len());
+        assert_eq!(16, record.len());
         writer.write(&record);
 
         reader.begin_reading(&mut cursor);
         assert_eq!(16, cursor.end);
         let read = reader.read(&mut cursor, &mut temp).unwrap();
         let header = abi::Header::from_slice(read).unwrap();
-        assert_eq!(13, header.size);
+        assert_eq!(16, header.size);
         assert_eq!(payload, read[8..13]);
+        assert_eq!([0u8; 3], read[13..16]);
         assert!(!cursor.more());
         reader.end_reading(&cursor);
 
