@@ -1486,7 +1486,15 @@ mod tests {
         Sample::write_time(time, &mut raw_data);
 
         /* PERF_SAMPLE_RAW DataField withn perf */
-        Sample::write_raw(event_data.as_slice(), &mut raw_data);
+        let raw_len = event_data.len() as u32;
+        let field_size = 4 + event_data.len();
+        let aligned_field_size = abi::align_to_perf_record(field_size);
+        raw_data.extend_from_slice(&raw_len.to_ne_bytes());
+        raw_data.extend_from_slice(event_data.as_slice());
+        let padding = aligned_field_size - field_size;
+        if padding > 0 {
+            raw_data.resize(raw_data.len() + padding, 0);
+        }
 
         /* Perf header that encapsulates the above data as a PERF_RECORD_SAMPLE */
         Header::write(abi::PERF_RECORD_SAMPLE, 0, raw_data.as_slice(), &mut perf_data);
@@ -1567,7 +1575,15 @@ mod tests {
         raw_data.extend_from_slice(&0u32.to_ne_bytes());
 
         /* PERF_SAMPLE_RAW data field with alignment padding */
-        Sample::write_raw(event_data.as_slice(), &mut raw_data);
+        let raw_len = event_data.len() as u32;
+        let field_size = 4 + event_data.len();
+        let aligned_field_size = abi::align_to_perf_record(field_size);
+        raw_data.extend_from_slice(&raw_len.to_ne_bytes());
+        raw_data.extend_from_slice(event_data.as_slice());
+        let padding = aligned_field_size - field_size;
+        if padding > 0 {
+            raw_data.resize(raw_data.len() + padding, 0);
+        }
         assert_eq!(16, raw_data.len());
 
         Header::write(abi::PERF_RECORD_SAMPLE, 0, raw_data.as_slice(), &mut perf_data);
