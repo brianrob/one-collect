@@ -526,7 +526,7 @@ impl CpuRingCursor {
         self.end = end;
     }
 
-    pub fn advance(
+    fn advance(
         &mut self,
         len: u64) {
         self.start += len;
@@ -1148,8 +1148,7 @@ impl InProcessRingBufWriter {
     /// Write raw bytes into the ring buffer without any lost-record logic.
     /// Caller must ensure aligned record size is <= `self.data_size` and that
     /// sufficient space is available.
-    fn write_raw(&mut self, record: &[u8]) {
-        let aligned_len = align_ring_record_size(record.len());
+    fn write_raw(&mut self, record: &[u8], aligned_len: usize) {
         let write_pos = self.head & self.data_mask;
 
         unsafe {
@@ -1231,7 +1230,7 @@ impl InProcessRingBufWriter {
         );
 
         self.lost_count = 0;
-        self.write_raw(&record);
+        self.write_raw(&record, align_ring_record_size(record.len()));
     }
 
     /// Flush any pending lost record. Call this at the end of a session
@@ -1284,7 +1283,7 @@ impl InProcessRingBufWriter {
         }
 
         self.flush_pending_lost();
-        self.write_raw(record);
+        self.write_raw(record, aligned_len);
     }
 }
 
