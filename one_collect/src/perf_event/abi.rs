@@ -3,6 +3,12 @@
 
 use std::array::TryFromSliceError;
 
+pub const PERF_RECORD_ALIGNMENT: usize = 8;
+
+pub fn align_to_perf_record(size: usize) -> usize {
+    (size + (PERF_RECORD_ALIGNMENT - 1)) & !(PERF_RECORD_ALIGNMENT - 1)
+}
+
 // Current possible sample layout:
 // u64    id;          /* if PERF_SAMPLE_IDENTIFIER */
 // u64    ip;          /* if PERF_SAMPLE_IP */
@@ -314,9 +320,9 @@ impl<'a> Header<'a> {
         misc: u16,
         data: &[u8],
         output: &mut Vec<u8>) {
-        /* Account for header itself, then align records to 8-byte boundaries. */
+        /* Account for the header itself, then align records to 8-byte boundaries. */
         let unaligned_size = data.len() + 8;
-        let size = ((unaligned_size + 7) & !7) as u16;
+        let size = align_to_perf_record(unaligned_size) as u16;
         output.extend_from_slice(&entry_type.to_ne_bytes());
         output.extend_from_slice(&misc.to_ne_bytes());
         output.extend_from_slice(&size.to_ne_bytes());
@@ -344,7 +350,7 @@ impl Sample {
         output: &mut Vec<u8>) {
         let len = data.len() as u32;
         let field_size = 4 + data.len();
-        let aligned_field_size = (field_size + 7) & !7;
+        let aligned_field_size = align_to_perf_record(field_size);
 
         output.extend_from_slice(&len.to_ne_bytes());
         output.extend_from_slice(data);

@@ -36,12 +36,6 @@ unsafe fn mb() {
     asm!("dsb sy");
 }
 
-const RING_RECORD_ALIGNMENT: usize = 8;
-
-fn align_ring_record_size(size: usize) -> usize {
-    (size + (RING_RECORD_ALIGNMENT - 1)) & !(RING_RECORD_ALIGNMENT - 1)
-}
-
 pub trait RingBufOptions {
     fn clone_options(&self) -> Self;
 
@@ -1230,7 +1224,7 @@ impl InProcessRingBufWriter {
         );
 
         self.lost_count = 0;
-        self.write_raw(&record, align_ring_record_size(record.len()));
+        self.write_raw(&record, abi::align_to_perf_record(record.len()));
     }
 
     /// Flush any pending lost record. Call this at the end of a session
@@ -1245,7 +1239,7 @@ impl InProcessRingBufWriter {
     /// warning is logged.  On a successful write, any accumulated
     /// lost events are flushed first.
     pub fn write(&mut self, record: &[u8]) {
-        let aligned_len = align_ring_record_size(record.len());
+        let aligned_len = abi::align_to_perf_record(record.len());
 
         if aligned_len > self.data_size {
             warn!(

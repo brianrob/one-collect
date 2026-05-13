@@ -855,7 +855,7 @@ impl PerfSession {
                 if perf_data.has_format(abi::PERF_SAMPLE_RAW) {
                     let size = perf_data.read_u32(offset)? as usize;
                     let raw_field_size = 4 + size;
-                    let raw_field_aligned_size = (raw_field_size + 7) & !7;
+                    let raw_field_aligned_size = abi::align_to_perf_record(raw_field_size);
                     offset += 4;
                     id = Some(perf_data.read_u16(offset)? as usize);
                     offset += self.raw_field.update(offset, size);
