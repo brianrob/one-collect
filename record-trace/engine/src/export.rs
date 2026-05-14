@@ -282,11 +282,17 @@ impl NetTraceExporter {
         }
 
         let output_exists = output_path.exists();
-        let open_result = OpenOptions::new()
-            .write(true)
-            .create(!output_exists)
-            .create_new(!output_exists)
-            .open(output_path);
+        let open_result = if output_exists {
+            OpenOptions::new()
+                .write(true)
+                .open(output_path)
+        }
+        else {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(output_path)
+        };
 
         match open_result {
             Ok(_) => {
