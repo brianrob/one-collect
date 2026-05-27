@@ -477,7 +477,7 @@ impl<'a> ExportProcessReplay<'a> {
         self.process.mappings().get(self.mapping_index)
     }
 
-    pub(crate) fn done(&self) -> bool { self.current_time == u64::MAX }
+    pub(crate) const fn done(&self) -> bool { self.current_time == u64::MAX }
 
     pub(crate) fn advance(&mut self) {
         /* Advance index by time */

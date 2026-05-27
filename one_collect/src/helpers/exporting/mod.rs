@@ -220,44 +220,44 @@ impl ExportSampler {
         }
     }
 
-    fn override_version(
+    const fn override_version(
         &mut self,
         version: Option<u16>) {
         self.version_override = version;
     }
 
     #[allow(dead_code)]
-    fn override_id(
+    const fn override_id(
         &mut self,
         id: Option<usize>) {
         self.id_override = id;
     }
 
-    fn override_op_code(
+    const fn override_op_code(
         &mut self,
         op_code: Option<u16>) {
         self.op_code_override = op_code;
     }
 
-    fn override_span_id(
+    const fn override_span_id(
         &mut self,
         span_id: Option<[u8; 8]>) {
         self.span_id_override = span_id;
     }
 
-    fn override_trace_id(
+    const fn override_trace_id(
         &mut self,
         trace_id: Option<[u8; 16]>) {
         self.trace_id_override = trace_id;
     }
 
-    fn override_activity_id(
+    const fn override_activity_id(
         &mut self,
         activity_id: Option<[u8; 16]>) {
         self.activity_id_override = activity_id;
     }
 
-    fn override_related_activity_id(
+    const fn override_related_activity_id(
         &mut self,
         related_activity_id: Option<[u8; 16]>) {
         self.related_activity_id_override = related_activity_id;
@@ -433,7 +433,7 @@ pub struct ExportBuiltContext<'a> {
 }
 
 impl<'a> ExportBuiltContext<'a> {
-    fn new(
+    const fn new(
         exporter: &'a mut ExportMachine,
         event: &'a Event,
         session: &'a mut os::Session) -> Self {
@@ -446,9 +446,9 @@ impl<'a> ExportBuiltContext<'a> {
         }
     }
 
-    fn take_sample_kind(&mut self) -> Option<u16> { self.sample_kind.take() }
+    const fn take_sample_kind(&mut self) -> Option<u16> { self.sample_kind.take() }
 
-    fn take_record_type(&mut self) -> Option<u16> { self.record_type.take() }
+    const fn take_record_type(&mut self) -> Option<u16> { self.record_type.take() }
 
     pub fn event(&self) -> &Event { self.event }
 
@@ -666,7 +666,7 @@ pub struct ExportTraceContext<'a> {
 }
 
 impl<'a> ExportTraceContext<'a> {
-    fn new(
+    const fn new(
         sampler: Writable<ExportSampler>,
         proxy: Writable<ExportProxy>,
         sample_kind: u16,

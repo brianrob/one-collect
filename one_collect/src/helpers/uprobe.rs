@@ -16,7 +16,7 @@ pub struct UProbe<'a> {
 }
 
 impl<'a> UProbe<'a> {
-    fn new(
+    const fn new(
         probe_type: &'a str,
         name: &'a str,
         address: u64) -> Self {

@@ -54,7 +54,7 @@ struct FrameState {
 }
 
 impl FrameState {
-    fn new(
+    const fn new(
         rva: u64,
         cfa_reg: u8,
         cfa_off: i16) -> Self {
@@ -157,7 +157,7 @@ struct FrameOptions {
 }
 
 impl FrameOptions {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             enc: DW_EH_PE_UDATA8 |
                  DW_EH_PE_ABSPTR,
@@ -179,7 +179,7 @@ pub struct FrameOffset {
 }
 
 impl FrameOffset {
-    fn new(
+    const fn new(
         rva: u64,
         fde: u64) -> Self {
         Self {
@@ -245,7 +245,7 @@ impl FrameOffset {
         self.state = STATE_INVALID;
     }
 
-    fn mark_valid(&mut self) {
+    const fn mark_valid(&mut self) {
         self.state = STATE_VALID;
     }
 

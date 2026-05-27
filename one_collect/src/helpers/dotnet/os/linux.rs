@@ -831,7 +831,7 @@ impl LinuxDotNetProvider {
         Ok(())
     }
 
-    fn ensure_keyword_level(
+    const fn ensure_keyword_level(
         &mut self,
         keyword: u64,
         level: u8) {

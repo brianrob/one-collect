@@ -516,7 +516,7 @@ impl PerfSession {
         self.read_timeout = timeout;
     }
 
-    pub(crate) fn capture_env_options_mut(&mut self) -> &mut CaptureEnvironmentOptions {
+    pub(crate) const fn capture_env_options_mut(&mut self) -> &mut CaptureEnvironmentOptions {
         &mut self.capture_env_options
     }
 

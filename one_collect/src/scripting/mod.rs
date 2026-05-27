@@ -220,7 +220,7 @@ impl ScriptEngine {
         }
     }
 
-    pub(crate) fn rhai_engine(&mut self) -> &mut Engine { &mut self.engine }
+    pub(crate) const fn rhai_engine(&mut self) -> &mut Engine { &mut self.engine }
 
     pub fn enable_os_scripting(&mut self) {
         self.os.enable(&mut self.engine);
