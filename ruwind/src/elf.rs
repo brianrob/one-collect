@@ -153,7 +153,7 @@ impl<'a> ElfSymbolIterator<'a> {
         }
     }
 
-    fn page_size_to_mask(page_size: u64) -> u64 {
+    const fn page_size_to_mask(page_size: u64) -> u64 {
         !((page_size - 1) as u64)
     }
 
@@ -863,7 +863,7 @@ struct ElfSymbol32 {
 }
 
 impl ElfSymbol32 {
-    fn is_function(&self) -> bool {
+    const fn is_function(&self) -> bool {
         self.st_info & 0xf == STT_FUNC
     }
 }
@@ -880,7 +880,7 @@ struct ElfSymbol64 {
 }
 
 impl ElfSymbol64 {
-    fn is_function(&self) -> bool {
+    const fn is_function(&self) -> bool {
         self.st_info & 0xf == STT_FUNC
     }
 }

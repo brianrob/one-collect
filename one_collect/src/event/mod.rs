@@ -301,7 +301,7 @@ impl DataField {
     ///
     /// # Returns
     /// - A new `DataField` instance.
-    fn new(
+    const fn new(
         start: u32,
         end: u32) -> Self {
         Self(start, end)
@@ -311,7 +311,7 @@ impl DataField {
     ///
     /// # Returns
     /// - The start position as usize.
-    fn start(&self) -> usize {
+    const fn start(&self) -> usize {
         self.0 as usize
     }
 
@@ -319,7 +319,7 @@ impl DataField {
     ///
     /// # Returns
     /// - The end position as usize.
-    fn end(&self) -> usize {
+    const fn end(&self) -> usize {
         self.1 as usize
     }
 }

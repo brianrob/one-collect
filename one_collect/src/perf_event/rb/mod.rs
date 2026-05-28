@@ -309,7 +309,7 @@ impl<T> RingBufBuilder<T> {
     /// Sets `FLAG_WATERMARK` and `wakeup_events_watermark` on the
     /// underlying `perf_event_attr`. A value of `0` keeps the kernel
     /// default of waking on every event.
-    pub(crate) fn set_wakeup_watermark(&mut self, bytes: u32) {
+    pub(crate) const fn set_wakeup_watermark(&mut self, bytes: u32) {
         self.attributes.flags |= FLAG_WATERMARK;
         self.attributes.wakeup_events_watermark = bytes;
     }
@@ -611,7 +611,7 @@ impl<'a> CpuRingReader {
         reader
     }
 
-    fn slice(&self) -> &[u8] {
+    const fn slice(&self) -> &[u8] {
         unsafe {
             std::slice::from_raw_parts(
                 self.pages,

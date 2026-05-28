@@ -136,7 +136,7 @@ impl DotNetEventGroup {
 
     pub fn level(&self) -> u8 { self.level }
 
-    fn update_keyword(
+    const fn update_keyword(
         &mut self,
         keyword: u64,
         level: u8) {
@@ -163,12 +163,12 @@ pub (crate) struct DotNetProviderFlags {
 }
 
 impl DotNetProviderFlags {
-    fn with_callstacks(&mut self) {
+    const fn with_callstacks(&mut self) {
         self.callstacks = true;
         self.callstack_keywords = u64::MAX;
     }
 
-    fn with_callstacks_for_keywords(
+    const fn with_callstacks_for_keywords(
         &mut self,
         keywords: u64) {
         self.callstacks = true;
@@ -205,9 +205,9 @@ pub (crate) struct DotNetScenario {
 }
 
 impl DotNetScenario {
-    fn with_records(&mut self) { self.record = true; }
+    const fn with_records(&mut self) { self.record = true; }
 
-    fn with_callstacks(&mut self) { self.callstacks = true; }
+    const fn with_callstacks(&mut self) { self.callstacks = true; }
 
     fn use_scenario(
         &mut self,

@@ -257,19 +257,19 @@ struct PEResData {
 }
 
 impl PEResEntry {
-    fn is_named(&self) -> bool {
+    const fn is_named(&self) -> bool {
         (self.name_id_offset & 0x80000000) != 0
     }
 
-    fn name_id_value(&self) -> u32 {
+    const fn name_id_value(&self) -> u32 {
         self.name_id_offset & 0x7FFFFFFF
     }
 
-    fn is_dir(&self) -> bool {
+    const fn is_dir(&self) -> bool {
         (self.dir_data_offset & 0x80000000) != 0
     }
 
-    fn dir_data_value(&self) -> u32 {
+    const fn dir_data_value(&self) -> u32 {
         self.dir_data_offset & 0x7FFFFFFF
     }
 }

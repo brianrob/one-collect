@@ -164,7 +164,7 @@ impl UniversalExporter {
             until)
     }
 
-    pub(crate) fn cpu_buf_bytes(&self) -> usize { self.cpu_buf_bytes }
+    pub(crate) const fn cpu_buf_bytes(&self) -> usize { self.cpu_buf_bytes }
 
     pub(crate) fn run_build_hooks(
         &mut self,
@@ -218,7 +218,7 @@ impl UniversalExporter {
         }
     }
 
-    pub(crate) fn settings_mut(&mut self) -> Option<&mut ExportSettings> {
+    pub(crate) const fn settings_mut(&mut self) -> Option<&mut ExportSettings> {
         self.settings.as_mut()
     }
 }
